@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Via Láctea TD — v0.5.0</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font-family: system-ui, sans-serif; background: #050814; color: #e8eaf0; }
+    .layout { display: flex; gap: 14px; align-items: flex-start; width: min(920px, 98vw);
+      flex-wrap: wrap; justify-content: center; padding: 12px; box-sizing: border-box; }
+    .wrap { width: min(720px, 96vw); flex: 1 1 520px; }
+    header { margin-bottom: 8px; }
+    h1 { margin: 0; font-size: 18px; }
+    p { margin: 6px 0 0; font-size: 13px; opacity: .75; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+    button, .chip, select { background: #1e2744; color: #fff; border: 0; border-radius: 10px;
+      padding: 8px 12px; cursor: pointer; font-size: 13px; }
+    button.primary { background: #6b5cff; }
+    button.power { background: #3d2a6e; }
+    button.hero { background: #8b5a00; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    .chip.active { outline: 2px solid #a5b4ff; }
+    #stats { margin-left: auto; font-size: 12px; white-space: nowrap; }
+    #hpBarWrap, #vsHpWrap { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    #vsHpWrap { display: none; gap: 14px; flex-wrap: wrap; }
+    #hpHearts, #hpHeartsAi { letter-spacing: 1px; color: #7dd3fc; font-size: 14px; }
+    #hpHeartsAi { color: #f472b6; }
+    #hpBar, #hpBarAi { width: 100px; height: 10px; background: #232844; border-radius: 6px; overflow: hidden; }
+    #hpFill, #hpFillAi { height: 100%; width: 100%; background: #4ade80; border-radius: 6px; transition: width .15s, background .15s; }
+    #hpFillAi { background: #f472b6; }
+    canvas { width: 100%; height: auto; background: #0a0f24; border-radius: 12px;
+      border: 1px solid #2a2f45; display: block; cursor: crosshair; }
+    .side { width: 180px; flex: 0 0 180px; background: #0c1228; border: 1px solid #2a2f45;
+      border-radius: 12px; padding: 12px; box-sizing: border-box; }
+    .side h2 { margin: 0 0 8px; font-size: 14px; }
+    .side ol { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.55; opacity: .9; }
+    .side li { margin-bottom: 4px; }
+    .side .empty { font-size: 12px; opacity: .55; }
+    .side .rec { margin-top: 10px; font-size: 12px; color: #f0c14a; }
+    .side .card-stats { margin-top: 12px; font-size: 11px; line-height: 1.45; opacity: .85; }
+    .side .card-stats strong { color: #a5b4ff; }
+    label.opt { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+    .hint { font-size: 11px; opacity: .55; margin-top: 4px; }
+    #startScreen, #waveSummary, #upgradeModal, #packModal, #winnerOverlay { position: fixed; inset: 0; z-index: 9; display: none; place-items: center;
+      padding: 18px; box-sizing: border-box; background: rgba(4, 6, 16, .82); }
+    #startScreen.open, #waveSummary.open, #upgradeModal.open, #packModal.open, #winnerOverlay.open { display: grid; }
+    #startScreen { z-index: 12; }
+    #packModal { z-index: 11; }
+    #winnerOverlay { z-index: 13; }
+    .start-card, .summary-card, .upgrade-card, .pack-card, .winner-card { width: min(520px, 94vw); background: #0c1228; border: 1px solid #6b5cff;
+      border-radius: 16px; padding: 22px; box-shadow: 0 18px 60px rgba(0,0,0,.5); }
+    .start-card { text-align: center; width: min(560px, 94vw); }
+    .start-card h2 { margin: 0 0 6px; font-size: 24px; }
+    .start-card .sub { margin: 0 0 14px; opacity: .7; font-size: 13px; }
+    .mode-step { margin-bottom: 14px; }
+    .mode-step h3 { margin: 0 0 8px; font-size: 13px; opacity: .8; font-weight: 600; letter-spacing: .02em; }
+    .pick-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .pick-row.three { grid-template-columns: 1fr 1fr 1fr; }
+    .pick { background: #1a2240; border: 2px solid #2a3558; border-radius: 12px; padding: 14px 10px; cursor: pointer; color: #fff; }
+    .pick:hover, .pick.active { border-color: #a5b4ff; background: #252f55; }
+    .pick.stub { opacity: .55; cursor: not-allowed; border-style: dashed; }
+    .pick.stub:hover { border-color: #2a3558; background: #1a2240; }
+    .pick .emoji { font-size: 28px; display: block; margin-bottom: 6px; }
+    .pick strong { display: block; margin-bottom: 4px; }
+    .pick span { display: block; font-size: 11px; opacity: .7; line-height: 1.3; }
+    .pick .badge { display: inline-block; margin-top: 6px; font-size: 10px; background: #3d2a6e; padding: 2px 8px; border-radius: 999px; opacity: 1; }
+    .diff-row { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .diff-row button.active { outline: 2px solid #f0c14a; }
+    .setup-solo, .setup-mp { display: none; }
+    .setup-solo.show, .setup-mp.show { display: block; }
+    .summary-card { text-align: center; border-color: #4ade80; width: min(430px, 92vw); }
+    .summary-card h2 { margin: 0 0 14px; font-size: 22px; }
+    .summary-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
+    .summary-stat { background: #1a2240; border-radius: 10px; padding: 10px 8px; font-size: 13px; }
+    .summary-stat strong { display: block; color: #fff; font-size: 16px; margin-top: 3px; }
+    #waveSummaryCountdown { margin: 8px 0 14px; color: #a5b4ff; font-size: 15px; }
+    .upgrade-card { border-color: #5968d8; width: min(620px, 94vw); }
+    .upgrade-card h2 { margin: 0; font-size: 22px; }
+    .upgrade-card p { margin: 6px 0 16px; }
+    #upgradeChoices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .upgrade-choice { min-height: 118px; text-align: left; background: #1a2240; border: 1px solid #3a4160;
+      border-radius: 12px; padding: 12px; transition: transform .12s, border-color .12s; }
+    .upgrade-choice:hover { transform: translateY(-2px); border-color: #a5b4ff; }
+    .upgrade-choice strong { display: block; color: #fff; margin-bottom: 8px; }
+    .upgrade-choice span { display: block; font-size: 12px; line-height: 1.35; opacity: .8; }
+    .pack-card { text-align: center; border-color: #f0c14a; width: min(560px, 94vw); }
+    .pack-card h2 { margin: 0 0 6px; font-size: 22px; }
+    .pack-card .sub { margin: 0 0 16px; opacity: .7; font-size: 13px; }
+    .pack-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 8px; }
+    .pack-choice { background: #1a2240; border: 2px solid #3a4160; border-radius: 12px; padding: 14px 10px; cursor: pointer; color: #fff; text-align: center; }
+    .pack-choice:hover, .pack-choice.active { border-color: #f0c14a; background: #2a2440; }
+    .pack-choice .emoji { font-size: 26px; display: block; margin-bottom: 6px; }
+    .pack-choice strong { display: block; margin-bottom: 4px; font-size: 14px; }
+    .pack-choice span { display: block; font-size: 11px; opacity: .7; line-height: 1.35; }
+    .winner-card { text-align: center; border-color: #f0c14a; }
+    .winner-card h2 { margin: 0 0 8px; font-size: 26px; }
+    .winner-card p { margin: 0 0 18px; }
+    @media (max-width: 560px) {
+      #upgradeChoices, .pack-row, .pick-row.three { grid-template-columns: 1fr; }
+      .upgrade-choice { min-height: 0; }
+      .pick-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="wrap">
+      <header>
+        <h1>🌌 Via Láctea TD · v0.5.0</h1>
+        <p id="headerHint">Torres fora dos dois caminhos. Espaço = pausa. Rank salva as 10 melhores partidas.</p>
+      </header>
+      <div class="row">
+        <button class="chip active" data-tower="laser" type="button" title="Força 2 · Alcance 4 · Cadência 4">⚡ Laser ($25)</button>
+        <button class="chip" data-tower="escudo" type="button" title="Força 4 · Alcance 2 · Cadência 2 · Lentidão">🛡 Escudo ($35)</button>
+        <button class="chip" data-tower="sonda" type="button" title="Força 5 · Alcance 5 · Cadência 1">📡 Sonda ($45)</button>
+        <button class="hero" id="btnHero" type="button" title="Coloque uma vez — AOE forte">🚀 Herói ($100)</button>
+        <button class="primary" id="btnStart" type="button">Onda</button>
+        <button id="btnPause" type="button">Pausar</button>
+        <button id="btnVida" type="button" title="Uma vez por onda">+Escudo ($80)</button>
+        <button id="btnReset" type="button">Reset</button>
+        <span id="stats">HP 20 · $70 · Onda 0 · Pts 0</span>
+      </div>
+      <div class="row">
+        <div id="hpBarWrap">
+          <span id="baseLabel">Base</span>
+          <span id="hpHearts"></span>
+          <div id="hpBar"><div id="hpFill"></div></div>
+        </div>
+        <div id="vsHpWrap">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span>IA</span>
+            <span id="hpHeartsAi"></span>
+            <div id="hpBarAi"><div id="hpFillAi"></div></div>
+          </div>
+        </div>
+        <button class="power" id="btnBomb" type="button" title="Clique no mapa para detonação">💣 Bomba ($50)</button>
+        <button class="power" id="btnFreeze" type="button" title="Congela todos por 3s">❄ Congelar ($40)</button>
+        <label>
+          Layout
+          <select id="mapSelect" title="Só muda com onda 0 e sem torres (ou após Reset)">
+            <option value="orbita">Órbita</option>
+            <option value="nebulosa">Nebulosa</option>
+            <option value="asteroides">Asteroides</option>
+          </select>
+        </label>
+        <label class="opt"><input type="checkbox" id="showRange" /> Mostrar alcance</label>
+      </div>
+      <canvas id="game" width="720" height="520"></canvas>
+      <p class="hint">Teclas: 1 Laser · 2 Escudo · 3 Sonda · H Herói · B Bomba · F Congelar · Espaço pausa. Alcance no hover / ao plantar.</p>
+    </div>
+    <aside class="side" id="rankPanel">
+      <h2>Rank</h2>
+      <ol id="rankList"><li class="empty">Sem partidas ainda</li></ol>
+      <div class="rec" id="recorde">Recorde: 0</div>
+      <div class="card-stats" id="towerCard">
+        <strong>Carta selecionada</strong><br />
+        Escolha uma torre para ver Força · Alcance · Cadência
+      </div>
+    </aside>
+  </div>
+
+  <div id="startScreen" class="open" role="dialog" aria-modal="true" aria-labelledby="startTitle">
+    <div class="start-card">
+      <h2 id="startTitle">🌌 Via Láctea TD</h2>
+      <p class="sub">Solo e Multijogador são modos separados — escolha como jogar</p>
+
+      <div class="mode-step" id="stepMode">
+        <h3>1. Modo</h3>
+        <div class="pick-row">
+          <button type="button" class="pick active" data-branch="solo" id="pickSolo">
+            <span class="emoji">🛡</span>
+            <strong>Jogar Solo</strong>
+            <span>Defenda sua base contra ondas scriptadas.<br />Sem enviar ataques — o clássico Via Láctea TD.</span>
+          </button>
+          <button type="button" class="pick" data-branch="multi" id="pickMulti">
+            <span class="emoji">⚔</span>
+            <strong>Multijogador</strong>
+            <span>Estilo Warcraft TD: escolha packs de ataque e envie para o oponente.</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="mode-step" id="stepMpKind" style="display:none">
+        <h3>2. Oponente</h3>
+        <div class="pick-row">
+          <button type="button" class="pick active" data-mp="vsia" id="pickVsIa">
+            <span class="emoji">🤖</span>
+            <strong>vs IA</strong>
+            <span>Local · tela dividida<br />Você à esquerda, IA à direita</span>
+          </button>
+          <button type="button" class="pick stub" data-mp="amigo" id="pickAmigo" disabled title="Em breve">
+            <span class="emoji">👥</span>
+            <strong>Amigo</strong>
+            <span>Online com um amigo</span>
+            <span class="badge">Em breve</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="setup-solo show" id="setupSolo">
+        <h3 style="margin:0 0 8px;font-size:13px;opacity:.8">Última defesa · dificuldade</h3>
+        <div class="pick-row">
+          <button type="button" class="pick active" data-base="terra" id="pickTerra">
+            <span class="emoji">🌍</span>
+            <strong>Planeta Terra</strong>
+            <span>HP 24 · ouro inicial $60<br />mais resistente</span>
+          </button>
+          <button type="button" class="pick" data-base="lunar" id="pickLunar">
+            <span class="emoji">🌙</span>
+            <strong>Base Lunar</strong>
+            <span>HP 16 · ouro inicial $90<br />mais ouro, menos vida</span>
+          </button>
+        </div>
+        <div class="diff-row">
+          <button type="button" class="chip" data-diff="facil">Fácil</button>
+          <button type="button" class="chip active" data-diff="normal">Normal</button>
+          <button type="button" class="chip" data-diff="dificil">Difícil</button>
+        </div>
+        <button type="button" class="primary" id="btnBeginSolo" style="width:100%;padding:12px;font-size:15px">Começar missão Solo</button>
+      </div>
+
+      <div class="setup-mp" id="setupMp">
+        <h3 style="margin:0 0 8px;font-size:13px;opacity:.8">Base (você e a IA) · dificuldade</h3>
+        <div class="pick-row">
+          <button type="button" class="pick active" data-base-mp="terra" id="pickTerraMp">
+            <span class="emoji">🌍</span>
+            <strong>Planeta Terra</strong>
+            <span>HP 24 · ouro $60 cada lado</span>
+          </button>
+          <button type="button" class="pick" data-base-mp="lunar" id="pickLunarMp">
+            <span class="emoji">🌙</span>
+            <strong>Base Lunar</strong>
+            <span>HP 16 · ouro $90 cada lado</span>
+          </button>
+        </div>
+        <div class="diff-row" id="diffMp">
+          <button type="button" class="chip" data-diff-mp="facil">Fácil</button>
+          <button type="button" class="chip active" data-diff-mp="normal">Normal</button>
+          <button type="button" class="chip" data-diff-mp="dificil">Difícil</button>
+        </div>
+        <button type="button" class="primary" id="btnBeginMp" style="width:100%;padding:12px;font-size:15px">Começar vs IA</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="packModal" role="dialog" aria-modal="true" aria-labelledby="packTitle">
+    <div class="pack-card">
+      <h2 id="packTitle">Escolha o pack de ataque</h2>
+      <p class="sub">O que você enviar ataca a pista da IA. A IA envia o dela para a sua.</p>
+      <div class="pack-row" id="packChoices">
+        <button type="button" class="pack-choice" data-pack="leve">
+          <span class="emoji">💨</span>
+          <strong>Força leve</strong>
+          <span>Rápidos e numerosos<br />🛸 UFO · 🦠 Vírus</span>
+        </button>
+        <button type="button" class="pack-choice" data-pack="mista">
+          <span class="emoji">⚖️</span>
+          <strong>Força mista</strong>
+          <span>Equilíbrio<br />👽 Alien · 🛸 UFO · 👾 Predador</span>
+        </button>
+        <button type="button" class="pack-choice" data-pack="pesada">
+          <span class="emoji">🪨</span>
+          <strong>Força pesada</strong>
+          <span>Tanques e armadura<br />👾 Predador · ☄️ Boss</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="winnerOverlay" role="dialog" aria-modal="true" aria-labelledby="winnerTitle">
+    <div class="winner-card">
+      <h2 id="winnerTitle">Vitória!</h2>
+      <p id="winnerBody">A base inimiga caiu.</p>
+      <button type="button" class="primary" id="btnWinnerOk" style="width:100%;padding:12px">Voltar ao menu</button>
+    </div>
+  </div>
+
+  <div id="waveSummary" role="dialog" aria-modal="true" aria-labelledby="waveSummaryTitle">
+    <div class="summary-card">
+      <h2 id="waveSummaryTitle">Onda concluída</h2>
+      <div id="waveSummaryStats" class="summary-stats"></div>
+      <p id="waveSummaryCountdown">Próxima onda em 5s</p>
+      <button id="btnNow" class="primary" type="button">Agora</button>
+    </div>
+  </div>
+  <div id="upgradeModal" role="dialog" aria-modal="true" aria-labelledby="upgradeTitle">
+    <div class="upgrade-card">
+      <h2 id="upgradeTitle">Upgrade — escolha 1</h2>
+      <p id="upgradeProgress">Atingiu mais $150 de ouro nesta run.</p>
+      <div id="upgradeChoices"></div>
+    </div>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
