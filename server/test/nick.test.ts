@@ -21,6 +21,7 @@ class FakeEl {
   width = 720;
   height = 520;
   text = '';
+  usedInnerHtml = false;
   onclick: (() => void) | null = null;
   readonly classList = {
     toggle: () => undefined,
@@ -44,14 +45,9 @@ class FakeEl {
   }
 
   set innerHTML(value: string) {
-    const html = String(value);
+    this.usedInnerHtml = true;
+    this.text = String(value);
     this.children = [];
-    this.text = html.replace(/<[^>]*>/g, '');
-    for (const match of html.matchAll(/<([a-zA-Z][\w-]*)\b/g)) {
-      const name = match[1].toLowerCase();
-      if (name === 'li' || name === 'div' || name === 'span' || name === 'strong' || name === 'br') continue;
-      this.children.push(new FakeEl(name));
-    }
   }
 
   append(...nodes: Array<FakeEl | { textContent?: string }>): void {
@@ -197,8 +193,8 @@ test('nick com HTML é recusado no servidor e renderizado como texto', async () 
     assert.ok(list);
     assert.equal(list.children.length, 1);
     assert.equal(list.children[0].textContent, `#1 ${HTML_NICK} · 1V 0D · 4 pts`);
+    assert.equal(list.children[0].usedInnerHtml, false);
     assert.equal(list.querySelector('img'), null);
-    assert.equal(list.querySelector('script'), null);
   } finally {
     if (server) await server.close();
     await rm(dir, { recursive: true, force: true });
