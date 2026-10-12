@@ -4,7 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { Hub, type HubOptions } from './hub.js';
-import { StrikeLimiter, clientTooSlow } from './limits.js';
+import { StrikeLimiter, clientIp, clientTooSlow } from './limits.js';
 import { parseClientMessage } from './protocol.js';
 import { RankStore } from './store.js';
 
@@ -161,7 +161,11 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
   };
 
   wss.on('connection', (socket, request) => {
-    const ip = request.socket.remoteAddress ?? 'desconhecido';
+    const ip = clientIp(
+      request.socket.remoteAddress,
+      headerText(request.headers['x-forwarded-for']),
+      headerText(request.headers['x-real-ip']),
+    );
     const open = connectionsByIp.get(ip) ?? 0;
     if (open >= maxConnectionsPerIp) {
       socket.close(1008, 'limite de conexões');
@@ -234,7 +238,13 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
       state.sessionId = result.sessionId;
       sockets.set(result.sessionId, socket);
       if (result.welcome) {
-        sendJson(socket, { type: 'welcome', sessionId: result.welcome.sessionId, token: result.welcome.token, view: result.welcome.view });
+        sendJson(socket, {
+          type: 'welcome',
+          sessionId: result.welcome.sessionId,
+          token: result.welcome.token,
+          playerId: result.welcome.playerId,
+          view: result.welcome.view,
+        });
       }
       broadcast();
     });
@@ -251,6 +261,11 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
     });
   });
 
+  function headerText(value: string | string[] | undefined): string | undefined {
+    if (Array.isArray(value)) return value[0];
+    return value;
+  }
+
   function inviteBlocked(state: SockState, inviteCode: string | undefined): boolean {
     if (!inviteCode || inviteCode.trim() === '') return false;
     return invites.blocked(`ip:${state.ip}`) || invites.blocked(`conn:${state.connectionId}`);
@@ -259,7 +274,7 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
   function dispatch(message: Exclude<ReturnType<typeof parseClientMessage>, null>, state: SockState) {
     switch (message.type) {
       case 'hello':
-        return hub.hello(message.nick, message.inviteCode, state.connectionId);
+        return hub.hello(message.nick, message.inviteCode, state.connectionId, message.playerId);
       case 'resume':
         return hub.resume(message.sessionId, message.token, state.connectionId);
       case 'magic':
@@ -296,6 +311,17 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
     }
   }, heartbeatMs);
 
+  const sweep = setInterval(() => {
+    invites.prune();
+    const live = new Map<string, number>();
+    for (const [socket, state] of states) {
+      if (socket.readyState !== socket.OPEN) continue;
+      live.set(state.ip, (live.get(state.ip) ?? 0) + 1);
+    }
+    connectionsByIp.clear();
+    for (const [ip, count] of live) connectionsByIp.set(ip, count);
+  }, 60_000);
+
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(options.port, host, () => {
@@ -307,6 +333,7 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
         close: () => new Promise((done, fail) => {
           clearInterval(timer);
           clearInterval(heartbeat);
+          clearInterval(sweep);
           wss.close();
           server.close((error) => (error ? fail(error) : done()));
         }),

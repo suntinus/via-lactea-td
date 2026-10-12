@@ -10,6 +10,7 @@ interface Welcome {
   type: 'welcome';
   sessionId: string;
   token: string;
+  playerId?: string;
   view: View;
 }
 
@@ -52,10 +53,13 @@ class Client {
   private socket: WebSocket | null = null;
   private cursor = 0;
 
-  constructor(private readonly port: number) {}
+  constructor(
+    private readonly port: number,
+    private readonly headers: Record<string, string> = {},
+  ) {}
 
   async connect(): Promise<void> {
-    const socket = new WebSocket(`ws://127.0.0.1:${this.port}`);
+    const socket = new WebSocket(`ws://127.0.0.1:${this.port}`, { headers: this.headers });
     this.socket = socket;
     socket.on('error', () => undefined);
     socket.on('message', (data) => {
@@ -350,6 +354,48 @@ test('limite de conexões por IP e de salas por conexão', async () => {
     const limited = await host.wait((message): message is ErrorMessage => message.type === 'error' && message.code === 'limite_salas');
     assert.equal(limited.code, 'limite_salas');
     await host.close();
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('dois clientes atrás do mesmo proxy usam IPs diferentes do header', async () => {
+  const { server, dir } = await boot(0.05, {
+    maxConnectionsPerIp: 1,
+    inviteMaxFails: 1,
+    inviteWindowMs: 60_000,
+    inviteBlockMs: 60_000,
+  });
+  try {
+    const left = new Client(server.port, { 'x-forwarded-for': '203.0.113.10, 127.0.0.1' });
+    const right = new Client(server.port, { 'x-real-ip': '203.0.113.20' });
+    await left.connect();
+    await right.connect();
+    const sameIp = new WebSocket(`ws://127.0.0.1:${server.port}`, {
+      headers: { 'x-forwarded-for': '203.0.113.10' },
+    });
+    sameIp.on('error', () => undefined);
+    const closed = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('a conexão repetida não fechou')), 3000);
+      sameIp.once('close', (code: number) => {
+        clearTimeout(timer);
+        resolve(code);
+      });
+    });
+    assert.equal(closed, 1008);
+    const playerId = 'ab'.repeat(16);
+    left.send({ type: 'hello', nick: 'Ana', inviteCode: 'NOPE00', playerId });
+    const first = await left.wait((message): message is ErrorMessage => message.type === 'error');
+    assert.equal(first.code, 'convite');
+    left.send({ type: 'hello', nick: 'Ana', inviteCode: 'NOPE01', playerId });
+    const blocked = await left.wait((message): message is ErrorMessage => message.type === 'error');
+    assert.equal(blocked.code, 'convite_bloqueado');
+    right.send({ type: 'hello', nick: 'Bia', inviteCode: 'NOPE00' });
+    const other = await right.wait((message): message is ErrorMessage => message.type === 'error');
+    assert.equal(other.code, 'convite');
+    await left.close();
+    await right.close();
   } finally {
     await server.close();
     await rm(dir, { recursive: true, force: true });

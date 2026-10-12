@@ -18,9 +18,12 @@ export interface HubOptions {
   maxRoomsPerConnection?: number;
 }
 
+const PLAYER_ID_RE = /^[a-f0-9]{32}$/;
+
 export interface SessionPlayer {
   sessionId: string;
   token: string;
+  playerId: string;
   nick: string;
   seat: Seat;
   ready: boolean;
@@ -100,6 +103,7 @@ export interface GameView {
 export interface Welcome {
   sessionId: string;
   token: string;
+  playerId: string;
   view: GameView;
 }
 
@@ -151,13 +155,14 @@ export class Hub {
     this.maxRoomsPerConnection = options.maxRoomsPerConnection ?? 1;
   }
 
-  hello(nickRaw: string, inviteCode?: string, connectionId?: string): HubResult {
+  hello(nickRaw: string, inviteCode?: string, connectionId?: string, playerId?: string): HubResult {
     const nick = nickRaw.trim();
     if (!NICK_RE.test(nick)) {
       return { ok: false, code: 'nick', message: 'Nick precisa ter 1 a 16 caracteres (letras, números, espaço, _ ou -).' };
     }
-    if (inviteCode && inviteCode.trim() !== '') return this.join(nick, inviteCode, connectionId);
-    return this.create(nick, connectionId);
+    const stableId = this.resolvePlayerId(playerId);
+    if (inviteCode && inviteCode.trim() !== '') return this.join(nick, inviteCode, connectionId, stableId);
+    return this.create(nick, connectionId, stableId);
   }
 
   resume(sessionId: string, token: string, connectionId?: string): HubResult {
@@ -179,7 +184,7 @@ export class Hub {
       if (player.reconnects > this.maxReconnects) this.forfeit(room, player);
     }
     const view = this.view(room, player);
-    return { ok: true, sessionId, welcome: { sessionId, token, view }, view };
+    return { ok: true, sessionId, welcome: { sessionId, token, playerId: player.playerId, view }, view };
   }
 
   lobby(sessionId: string, ready?: boolean, base?: BaseId): HubResult {
@@ -276,13 +281,13 @@ export class Hub {
     return list;
   }
 
-  private create(nick: string, connectionId?: string): HubResult {
+  private create(nick: string, connectionId: string | undefined, playerId: string): HubResult {
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
     if (connectionId && !this.claim(connectionId, code)) {
       return { ok: false, code: 'limite_salas', message: 'Esta conexão já está em uma sala.' };
     }
-    const player = this.player(nick, 'left', connectionId ?? null);
+    const player = this.player(nick, 'left', connectionId ?? null, playerId);
     const room: Room = {
       code,
       base: 'terra',
@@ -297,10 +302,10 @@ export class Hub {
     this.rooms.set(code, room);
     this.bySession.set(player.sessionId, room);
     const view = this.view(room, player);
-    return { ok: true, sessionId: player.sessionId, welcome: { sessionId: player.sessionId, token: player.token, view }, view };
+    return { ok: true, sessionId: player.sessionId, welcome: { sessionId: player.sessionId, token: player.token, playerId: player.playerId, view }, view };
   }
 
-  private join(nick: string, inviteCode: string, connectionId?: string): HubResult {
+  private join(nick: string, inviteCode: string, connectionId: string | undefined, playerId: string): HubResult {
     const code = inviteCode.trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) return { ok: false, code: 'convite', message: 'Código de convite não encontrado. Peça um link novo ao amigo.' };
@@ -311,21 +316,30 @@ export class Hub {
     if (room.match && room.match.phase !== 'over') {
       return { ok: false, code: 'em_partida', message: 'A partida já começou. Use a reconexão se você caiu.' };
     }
+    if (room.players.some((player) => player.playerId === playerId)) {
+      return { ok: false, code: 'jogador', message: 'Essa conta já está na sala.' };
+    }
     if (connectionId && !this.claim(connectionId, code)) {
       return { ok: false, code: 'limite_salas', message: 'Esta conexão já está em uma sala.' };
     }
-    const player = this.player(nick, 'right', connectionId ?? null);
+    const player = this.player(nick, 'right', connectionId ?? null, playerId);
     room.players.push(player);
     this.bySession.set(player.sessionId, room);
     this.touch(room);
     const view = this.view(room, player);
-    return { ok: true, sessionId: player.sessionId, welcome: { sessionId: player.sessionId, token: player.token, view }, view };
+    return { ok: true, sessionId: player.sessionId, welcome: { sessionId: player.sessionId, token: player.token, playerId: player.playerId, view }, view };
   }
 
-  private player(nick: string, seat: Seat, connectionId: string | null): SessionPlayer {
+  private resolvePlayerId(playerId?: string): string {
+    if (playerId && PLAYER_ID_RE.test(playerId)) return playerId;
+    return randomBytes(16).toString('hex');
+  }
+
+  private player(nick: string, seat: Seat, connectionId: string | null, playerId: string): SessionPlayer {
     return {
       sessionId: makeId(),
       token: randomBytes(24).toString('hex'),
+      playerId,
       nick,
       seat,
       ready: false,
@@ -445,7 +459,7 @@ export class Hub {
       let outcome: 'win' | 'loss' | 'draw' = 'draw';
       if (snap.winner === 'draw' || snap.winner === null) outcome = 'draw';
       else outcome = snap.winner === player.seat ? 'win' : 'loss';
-      return { nick: player.nick, score, outcome };
+      return { playerId: player.playerId, nick: player.nick, score, outcome };
     }), snap.wave);
   }
 

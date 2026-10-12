@@ -26,6 +26,7 @@ interface FileShape {
 }
 
 export interface RankOutcome {
+  playerId: string;
   nick: string;
   score: number;
   outcome: 'win' | 'loss' | 'draw';
@@ -33,10 +34,6 @@ export interface RankOutcome {
 
 function emptyFile(): FileShape {
   return { circles: {} };
-}
-
-function nickKey(nick: string): string {
-  return nick.trim().toLocaleLowerCase('pt-BR');
 }
 
 export class RankStore {
@@ -51,7 +48,7 @@ export class RankStore {
   record(code: string, entries: RankOutcome[], wave: number): RankingRow[] {
     const circle = this.data.circles[code] ?? { players: {}, matches: [] };
     for (const entry of entries) {
-      const key = nickKey(entry.nick);
+      const key = entry.playerId;
       const row = circle.players[key] ?? {
         nick: entry.nick.trim(),
         wins: 0,

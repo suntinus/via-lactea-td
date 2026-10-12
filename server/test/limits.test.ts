@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { Hub, type HubOptions } from '../src/hub.js';
-import { StrikeLimiter, clientTooSlow } from '../src/limits.js';
+import { StrikeLimiter, clientIp, clientTooSlow } from '../src/limits.js';
 import { RankStore } from '../src/store.js';
 
 async function openHub(options: HubOptions = {}): Promise<{ dir: string; hub: Hub }> {
@@ -42,6 +42,34 @@ test('o limitador bloqueia por chave e solta quando o prazo acaba', () => {
   assert.equal(windowed.blocked('ip:a'), false);
 });
 
+test('falhas de convite expiradas saem do mapa', () => {
+  let now = 0;
+  const limiter = new StrikeLimiter(3, 1_000, 5_000, () => now);
+  limiter.strike('ip:a');
+  assert.equal(limiter.size(), 1);
+  now = 1_000;
+  limiter.prune();
+  assert.equal(limiter.size(), 0);
+  limiter.strike('ip:b');
+  limiter.strike('ip:b');
+  limiter.strike('ip:b');
+  assert.equal(limiter.blocked('ip:b'), true);
+  now = 5_999;
+  limiter.prune();
+  assert.equal(limiter.size(), 1);
+  now = 6_000;
+  limiter.prune();
+  assert.equal(limiter.size(), 0);
+});
+
+test('header de IP só vale quando o peer é loopback', () => {
+  assert.equal(clientIp('127.0.0.1', '203.0.113.10, 10.0.0.1'), '203.0.113.10');
+  assert.equal(clientIp('::ffff:127.0.0.1', undefined, '203.0.113.20'), '203.0.113.20');
+  assert.equal(clientIp('::1'), '::1');
+  assert.equal(clientIp('203.0.113.9', '198.51.100.8', '203.0.113.20'), '203.0.113.9');
+  assert.equal(clientIp('127.0.0.1', 'nao-e-ip'), '127.0.0.1');
+});
+
 test('cliente lento é quem passa do bufferedAmount', () => {
   assert.equal(clientTooSlow(1_048_576, 1_048_576), false);
   assert.equal(clientTooSlow(1_048_577, 1_048_576), true);
@@ -51,12 +79,14 @@ test('ranking fica em memória e circles.json só é gravado quando muda', async
   const dir = await mkdtemp(path.join(tmpdir(), 'via-lactea-rank-'));
   const file = path.join(dir, 'circles.json');
   try {
+    const ana = 'a'.repeat(32);
+    const bia = 'b'.repeat(32);
     const store = new RankStore(file);
     store.ranking('SALA');
     assert.equal(existsSync(file), false);
     store.record('SALA', [
-      { nick: 'Ana', score: 10, outcome: 'win' },
-      { nick: 'Bia', score: 4, outcome: 'loss' },
+      { playerId: ana, nick: 'Ana', score: 10, outcome: 'win' },
+      { playerId: bia, nick: 'Bia', score: 4, outcome: 'loss' },
     ], 2);
     assert.equal(existsSync(file), true);
     const written = statSync(file).mtimeMs;
@@ -67,12 +97,20 @@ test('ranking fica em memória e circles.json só é gravado quando muda', async
     assert.equal(store.ranking('SALA')[0]?.wins, 1);
     assert.equal(existsSync(file), false);
     store.record('SALA', [
-      { nick: 'Ana', score: 3, outcome: 'win' },
-      { nick: 'Bia', score: 1, outcome: 'loss' },
+      { playerId: ana, nick: 'Ana', score: 3, outcome: 'win' },
+      { playerId: bia, nick: 'Bia', score: 1, outcome: 'loss' },
     ], 3);
     assert.equal(existsSync(file), true);
     const persisted = new RankStore(file);
     assert.equal(persisted.ranking('SALA')[0]?.wins, 2);
+    persisted.record('SALA', [
+      { playerId: ana, nick: 'Ana Nova', score: 1, outcome: 'win' },
+      { playerId: 'c'.repeat(32), nick: 'Ana Nova', score: 0, outcome: 'loss' },
+    ], 4);
+    const rows = persisted.ranking('SALA');
+    assert.equal(rows.length, 3);
+    assert.equal(rows.filter((row) => row.nick === 'Ana Nova').length, 2);
+    assert.equal(rows.find((row) => row.wins === 3)?.nick, 'Ana Nova');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -247,6 +285,7 @@ test('o exemplo de nginx documenta wss e timeouts e não está aplicado', () => 
   const text = readFileSync(file, 'utf8');
   assert.match(text, /listen 443 ssl/);
   assert.match(text, /proxy_pass http:\/\/127\.0\.0\.1:8030/);
+  assert.match(text, /X-Real-IP/);
   assert.match(text, /Upgrade/);
   assert.match(text, /proxy_read_timeout 3600s/);
   assert.match(text, /proxy_send_timeout 3600s/);

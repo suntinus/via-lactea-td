@@ -9,6 +9,8 @@
   const codeEl = document.getElementById('onlineCode');
   const readyBtn = document.getElementById('btnOnlineReady');
   const STORAGE_KEY = 'viaLacteaTdOnline';
+  const PLAYER_KEY = 'viaLacteaTdPlayer';
+  const PLAYER_ID_RE = /^[a-f0-9]{32}$/;
 
   let socket = null;
   let session = null;
@@ -42,8 +44,23 @@
     return active ? active.getAttribute('data-base-online') : 'terra';
   }
 
+  function loadPlayerId() {
+    try {
+      const raw = localStorage.getItem(PLAYER_KEY);
+      return typeof raw === 'string' && PLAYER_ID_RE.test(raw) ? raw : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function savePlayerId(id) {
+    if (typeof id !== 'string' || !PLAYER_ID_RE.test(id)) return;
+    try { localStorage.setItem(PLAYER_KEY, id); } catch { /* ignore */ }
+  }
+
   function remember(welcome) {
     session = { sessionId: welcome.sessionId, token: welcome.token, wsUrl: wsUrl() };
+    savePlayerId(welcome.playerId);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(session)); } catch { /* ignore */ }
   }
 
@@ -163,6 +180,8 @@
     }
     openSocket(() => {
       const message = { type: 'hello', nick };
+      const playerId = loadPlayerId();
+      if (playerId) message.playerId = playerId;
       if (inviteCode) message.inviteCode = inviteCode;
       sockSend(message);
     });

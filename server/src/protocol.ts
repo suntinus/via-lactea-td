@@ -9,7 +9,7 @@ export type ClientCommand =
   | { kind: 'upgrade'; upgradeId: string };
 
 export type ClientMessage =
-  | { type: 'hello'; nick: string; inviteCode?: string }
+  | { type: 'hello'; nick: string; inviteCode?: string; playerId?: string }
   | { type: 'resume'; sessionId: string; token: string }
   | { type: 'magic' }
   | { type: 'lobby'; ready?: boolean; base?: BaseId }
@@ -59,10 +59,12 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
     case 'hello': {
       if (typeof value.nick !== 'string') return null;
       if (value.inviteCode !== undefined && typeof value.inviteCode !== 'string') return null;
+      if (value.playerId !== undefined && typeof value.playerId !== 'string') return null;
       return {
         type: 'hello',
         nick: value.nick,
         inviteCode: typeof value.inviteCode === 'string' ? value.inviteCode : undefined,
+        playerId: typeof value.playerId === 'string' ? value.playerId : undefined,
       };
     }
     case 'resume':
