@@ -5,8 +5,18 @@ import { Match, type BaseId, type Intent, type MatchSnap, type Seat, type SideSn
 import { RankStore, type RankingRow } from './store.js';
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const RECONNECT_MS = 45_000;
 const NICK_RE = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,15}$/u;
+
+export interface HubOptions {
+  now?: () => number;
+  reconnectMs?: number;
+  maxPauses?: number;
+  maxReconnects?: number;
+  emptyTtlMs?: number;
+  idleTtlMs?: number;
+  finishedTtlMs?: number;
+  maxRoomsPerConnection?: number;
+}
 
 export interface SessionPlayer {
   sessionId: string;
@@ -16,6 +26,9 @@ export interface SessionPlayer {
   ready: boolean;
   connected: boolean;
   disconnectUntil: number | null;
+  pauses: number;
+  reconnects: number;
+  connectionId: string | null;
 }
 
 interface Room {
@@ -25,6 +38,9 @@ interface Room {
   match: Match | null;
   recorded: boolean;
   seed: number;
+  lastActivity: number;
+  endedAt: number | null;
+  emptySince: number | null;
 }
 
 export interface SideView {
@@ -111,30 +127,59 @@ function mirrorX(x: number, seat: Seat): number {
 export class Hub {
   private readonly rooms = new Map<string, Room>();
   private readonly bySession = new Map<string, Room>();
+  private readonly roomsByConnection = new Map<string, Set<string>>();
+  private readonly now: () => number;
+  private readonly reconnectMs: number;
+  private readonly maxPauses: number;
+  private readonly maxReconnects: number;
+  private readonly emptyTtlMs: number;
+  private readonly idleTtlMs: number;
+  private readonly finishedTtlMs: number;
+  private readonly maxRoomsPerConnection: number;
 
   constructor(
     private readonly store: RankStore,
-    private readonly now: () => number = () => Date.now(),
-  ) {}
+    options: HubOptions = {},
+  ) {
+    this.now = options.now ?? (() => Date.now());
+    this.reconnectMs = options.reconnectMs ?? 45_000;
+    this.maxPauses = options.maxPauses ?? 3;
+    this.maxReconnects = options.maxReconnects ?? 3;
+    this.emptyTtlMs = options.emptyTtlMs ?? 120_000;
+    this.idleTtlMs = options.idleTtlMs ?? 600_000;
+    this.finishedTtlMs = options.finishedTtlMs ?? 120_000;
+    this.maxRoomsPerConnection = options.maxRoomsPerConnection ?? 1;
+  }
 
-  hello(nickRaw: string, inviteCode?: string): HubResult {
+  hello(nickRaw: string, inviteCode?: string, connectionId?: string): HubResult {
     const nick = nickRaw.trim();
     if (!NICK_RE.test(nick)) {
       return { ok: false, code: 'nick', message: 'Nick precisa ter 1 a 16 caracteres (letras, números, espaço, _ ou -).' };
     }
-    if (inviteCode && inviteCode.trim() !== '') return this.join(nick, inviteCode);
-    return this.create(nick);
+    if (inviteCode && inviteCode.trim() !== '') return this.join(nick, inviteCode, connectionId);
+    return this.create(nick, connectionId);
   }
 
-  resume(sessionId: string, token: string): HubResult {
+  resume(sessionId: string, token: string, connectionId?: string): HubResult {
     const room = this.bySession.get(sessionId);
     const player = room?.players.find((item) => item.sessionId === sessionId);
     if (!room || !player || player.token !== token) {
       return { ok: false, code: 'sessao', message: 'Sessão não encontrada. Entre de novo com o código de convite.' };
     }
+    if (connectionId && !this.claim(connectionId, room.code)) {
+      return { ok: false, code: 'limite_salas', message: 'Esta conexão já está em uma sala.' };
+    }
+    const wasGone = !player.connected;
     player.connected = true;
-    player.disconnectUntil = null;
-    return { ok: true, sessionId, welcome: { sessionId, token, view: this.view(room, player) }, view: this.view(room, player) };
+    player.connectionId = connectionId ?? player.connectionId;
+    room.emptySince = null;
+    this.touch(room);
+    if (wasGone && room.match && room.match.phase !== 'over') {
+      player.reconnects += 1;
+      if (player.reconnects > this.maxReconnects) this.forfeit(room, player);
+    }
+    const view = this.view(room, player);
+    return { ok: true, sessionId, welcome: { sessionId, token, view }, view };
   }
 
   lobby(sessionId: string, ready?: boolean, base?: BaseId): HubResult {
@@ -147,10 +192,9 @@ export class Hub {
     if (base && player.seat === 'left' && !room.match) room.base = base;
     if (typeof ready === 'boolean') player.ready = ready;
     if (!room.match && room.players.length === 2 && room.players.every((item) => item.ready)) {
-      room.seed = randomBytes(4).readUInt32BE(0);
-      room.match = new Match({ seed: room.seed, base: room.base, diff: 'normal' });
-      room.recorded = false;
+      this.beginMatch(room);
     }
+    this.touch(room);
     return { ok: true, sessionId, view: this.view(room, player) };
   }
 
@@ -160,6 +204,7 @@ export class Hub {
     const { room, player } = found;
     if (!room.match) return { ok: false, code: 'sem_partida', message: 'Ainda não há partida. Os dois jogadores precisam ficar prontos.' };
     const result = room.match.command(this.toIntent(player.seat, command));
+    this.touch(room);
     this.maybeRecord(room);
     if (!result.ok) return { ok: false, code: 'comando', message: result.reason ?? 'Comando recusado.' };
     return { ok: true, sessionId, view: this.view(room, player) };
@@ -174,7 +219,14 @@ export class Hub {
     }
     room.match = null;
     room.recorded = false;
-    for (const item of room.players) item.ready = false;
+    room.endedAt = null;
+    for (const item of room.players) {
+      item.ready = false;
+      item.pauses = 0;
+      item.reconnects = 0;
+      item.disconnectUntil = null;
+    }
+    this.touch(room);
     return { ok: true, sessionId, view: this.view(room, player) };
   }
 
@@ -187,15 +239,25 @@ export class Hub {
   disconnect(sessionId: string): void {
     const room = this.bySession.get(sessionId);
     const player = room?.players.find((item) => item.sessionId === sessionId);
-    if (!room || !player) return;
+    if (!room || !player || !player.connected) return;
     player.connected = false;
-    if (room.match && room.match.phase !== 'over') player.disconnectUntil = this.now() + RECONNECT_MS;
+    this.release(player.connectionId, room.code);
+    player.connectionId = null;
+    this.touch(room);
+    if (room.players.every((item) => !item.connected) && room.emptySince === null) {
+      room.emptySince = this.now();
+    }
+    if (!room.match || room.match.phase === 'over') return;
+    player.pauses += 1;
+    if (player.disconnectUntil === null) player.disconnectUntil = this.now() + this.reconnectMs;
+    if (player.pauses > this.maxPauses || player.disconnectUntil <= this.now()) this.forfeit(room, player);
   }
 
   tick(dt: number): void {
     const now = this.now();
-    for (const room of this.rooms.values()) {
-      this.expire(room, now);
+    for (const room of [...this.rooms.values()]) {
+      this.expirePlayers(room, now);
+      if (this.expireRoom(room, now)) continue;
       if (!room.match || room.match.phase === 'over') continue;
       if (room.players.some((player) => !player.connected)) continue;
       room.match.tick(dt);
@@ -214,18 +276,31 @@ export class Hub {
     return list;
   }
 
-  private create(nick: string): HubResult {
+  private create(nick: string, connectionId?: string): HubResult {
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
-    const player = this.player(nick, 'left');
-    const room: Room = { code, base: 'terra', players: [player], match: null, recorded: false, seed: 1 };
+    if (connectionId && !this.claim(connectionId, code)) {
+      return { ok: false, code: 'limite_salas', message: 'Esta conexão já está em uma sala.' };
+    }
+    const player = this.player(nick, 'left', connectionId ?? null);
+    const room: Room = {
+      code,
+      base: 'terra',
+      players: [player],
+      match: null,
+      recorded: false,
+      seed: 1,
+      lastActivity: this.now(),
+      endedAt: null,
+      emptySince: null,
+    };
     this.rooms.set(code, room);
     this.bySession.set(player.sessionId, room);
     const view = this.view(room, player);
     return { ok: true, sessionId: player.sessionId, welcome: { sessionId: player.sessionId, token: player.token, view }, view };
   }
 
-  private join(nick: string, inviteCode: string): HubResult {
+  private join(nick: string, inviteCode: string, connectionId?: string): HubResult {
     const code = inviteCode.trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) return { ok: false, code: 'convite', message: 'Código de convite não encontrado. Peça um link novo ao amigo.' };
@@ -236,14 +311,18 @@ export class Hub {
     if (room.match && room.match.phase !== 'over') {
       return { ok: false, code: 'em_partida', message: 'A partida já começou. Use a reconexão se você caiu.' };
     }
-    const player = this.player(nick, 'right');
+    if (connectionId && !this.claim(connectionId, code)) {
+      return { ok: false, code: 'limite_salas', message: 'Esta conexão já está em uma sala.' };
+    }
+    const player = this.player(nick, 'right', connectionId ?? null);
     room.players.push(player);
     this.bySession.set(player.sessionId, room);
+    this.touch(room);
     const view = this.view(room, player);
     return { ok: true, sessionId: player.sessionId, welcome: { sessionId: player.sessionId, token: player.token, view }, view };
   }
 
-  private player(nick: string, seat: Seat): SessionPlayer {
+  private player(nick: string, seat: Seat, connectionId: string | null): SessionPlayer {
     return {
       sessionId: makeId(),
       token: randomBytes(24).toString('hex'),
@@ -252,7 +331,63 @@ export class Hub {
       ready: false,
       connected: true,
       disconnectUntil: null,
+      pauses: 0,
+      reconnects: 0,
+      connectionId,
     };
+  }
+
+  private beginMatch(room: Room): void {
+    room.seed = randomBytes(4).readUInt32BE(0);
+    room.match = new Match({ seed: room.seed, base: room.base, diff: 'normal' });
+    room.recorded = false;
+    room.endedAt = null;
+    for (const item of room.players) {
+      item.pauses = 0;
+      item.reconnects = 0;
+      item.disconnectUntil = null;
+    }
+  }
+
+  private forfeit(room: Room, player: SessionPlayer): void {
+    if (!room.match || room.match.phase === 'over') return;
+    room.match.forfeit(player.seat);
+    player.disconnectUntil = null;
+    this.maybeRecord(room);
+  }
+
+  private touch(room: Room): void {
+    room.lastActivity = this.now();
+  }
+
+  private claim(connectionId: string, code: string): boolean {
+    const owned = this.roomsByConnection.get(connectionId) ?? new Set<string>();
+    if (owned.has(code)) {
+      this.roomsByConnection.set(connectionId, owned);
+      return true;
+    }
+    if (owned.size >= this.maxRoomsPerConnection) return false;
+    owned.add(code);
+    this.roomsByConnection.set(connectionId, owned);
+    return true;
+  }
+
+  private release(connectionId: string | null, code: string): void {
+    if (!connectionId) return;
+    const owned = this.roomsByConnection.get(connectionId);
+    if (!owned) return;
+    owned.delete(code);
+    if (owned.size === 0) this.roomsByConnection.delete(connectionId);
+  }
+
+  private destroy(room: Room): void {
+    this.rooms.delete(room.code);
+    for (const player of room.players) {
+      this.bySession.delete(player.sessionId);
+      this.release(player.connectionId, room.code);
+      player.connectionId = null;
+      player.connected = false;
+    }
   }
 
   private require(sessionId: string): { ok: true; room: Room; player: SessionPlayer } | { ok: false; code: string; message: string } {
@@ -262,19 +397,46 @@ export class Hub {
     return { ok: true, room, player };
   }
 
-  private expire(room: Room, now: number): void {
+  private expirePlayers(room: Room, now: number): void {
     if (!room.match || room.match.phase === 'over') return;
     for (const player of room.players) {
       if (player.connected || player.disconnectUntil === null) continue;
       if (player.disconnectUntil > now) continue;
       const opponent = room.players.find((item) => item.sessionId !== player.sessionId);
-      if (opponent?.connected) room.match.forfeit(player.seat);
-      player.disconnectUntil = null;
-      this.maybeRecord(room);
+      if (opponent?.connected) this.forfeit(room, player);
+      else player.disconnectUntil = null;
     }
   }
 
+  private expireRoom(room: Room, now: number): boolean {
+    const live = room.match !== null && room.match.phase !== 'over';
+    const connected = room.players.some((player) => player.connected);
+    if (!connected && !live) {
+      const since = room.emptySince ?? now;
+      if (room.emptySince === null) room.emptySince = now;
+      if (now - since >= this.emptyTtlMs) {
+        this.destroy(room);
+        return true;
+      }
+      return false;
+    }
+    if (!room.match && now - room.lastActivity >= this.idleTtlMs) {
+      this.destroy(room);
+      return true;
+    }
+    if (room.match?.phase === 'over') {
+      const ended = room.endedAt ?? now;
+      if (room.endedAt === null) room.endedAt = now;
+      if (now - ended >= this.finishedTtlMs) {
+        this.destroy(room);
+        return true;
+      }
+    }
+    return false;
+  }
+
   private maybeRecord(room: Room): void {
+    if (room.match?.phase === 'over' && room.endedAt === null) room.endedAt = this.now();
     if (!room.match || room.match.phase !== 'over' || room.recorded) return;
     room.recorded = true;
     const snap = room.match.snapshot();

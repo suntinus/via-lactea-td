@@ -1,10 +1,15 @@
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { Hub } from './hub.js';
+import { Hub, type HubOptions } from './hub.js';
+import { StrikeLimiter, clientTooSlow } from './limits.js';
 import { parseClientMessage } from './protocol.js';
 import { RankStore } from './store.js';
+
+export const DEFAULT_HEARTBEAT_MS = 25_000;
+export const MAX_BUFFERED_BYTES = 1_048_576;
 
 export interface RunningServer {
   port: number;
@@ -18,6 +23,20 @@ export interface StartOptions {
   staticRoot: string;
   stepSec?: number;
   intervalMs?: number;
+  heartbeatMs?: number;
+  maxConnectionsPerIp?: number;
+  maxBufferedBytes?: number;
+  inviteMaxFails?: number;
+  inviteWindowMs?: number;
+  inviteBlockMs?: number;
+  now?: () => number;
+  reconnectMs?: number;
+  maxPauses?: number;
+  maxReconnects?: number;
+  emptyTtlMs?: number;
+  idleTtlMs?: number;
+  finishedTtlMs?: number;
+  maxRoomsPerConnection?: number;
 }
 
 const STATIC: Record<string, string> = {
@@ -33,6 +52,8 @@ interface SockState {
   sessionId: string | null;
   windowStart: number;
   count: number;
+  connectionId: string;
+  ip: string;
 }
 
 function contentType(file: string): string {
@@ -57,20 +78,38 @@ function byteLength(data: RawData): number {
   return data.length;
 }
 
-function sendJson(socket: WebSocket, payload: unknown): void {
-  if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(payload));
-}
-
 export function startServer(options: StartOptions): Promise<RunningServer> {
   const host = '127.0.0.1' as const;
   const stepSec = options.stepSec ?? 0.05;
   const intervalMs = options.intervalMs ?? 50;
+  const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+  const maxConnectionsPerIp = options.maxConnectionsPerIp ?? 8;
+  const maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
+  const now = options.now ?? Date.now;
   const store = new RankStore(path.join(options.dataDir, 'circles.json'));
-  const hub = new Hub(store);
+  const hubOptions: HubOptions = {
+    now,
+    reconnectMs: options.reconnectMs,
+    maxPauses: options.maxPauses,
+    maxReconnects: options.maxReconnects,
+    emptyTtlMs: options.emptyTtlMs,
+    idleTtlMs: options.idleTtlMs,
+    finishedTtlMs: options.finishedTtlMs,
+    maxRoomsPerConnection: options.maxRoomsPerConnection,
+  };
+  const hub = new Hub(store, hubOptions);
+  const invites = new StrikeLimiter(
+    options.inviteMaxFails ?? 5,
+    options.inviteWindowMs ?? 60_000,
+    options.inviteBlockMs ?? 120_000,
+    now,
+  );
   const sockets = new Map<string, WebSocket>();
   const states = new Map<WebSocket, SockState>();
+  const isAlive = new WeakMap<WebSocket, boolean>();
+  const connectionsByIp = new Map<string, number>();
 
-  const httpServer = http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (req.method === 'GET' && url.pathname === '/health') {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -96,7 +135,16 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
     });
   });
 
-  const wss = new WebSocketServer({ server: httpServer });
+  const wss = new WebSocketServer({ server, maxPayload: 8192 });
+
+  const sendJson = (socket: WebSocket, payload: unknown): void => {
+    if (socket.readyState !== socket.OPEN) return;
+    if (clientTooSlow(socket.bufferedAmount, maxBufferedBytes)) {
+      socket.close(1008, 'cliente lento');
+      return;
+    }
+    socket.send(JSON.stringify(payload));
+  };
 
   const broadcast = () => {
     for (const item of hub.views()) {
@@ -106,14 +154,33 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
     }
   };
 
-  wss.on('connection', (socket) => {
-    states.set(socket, { sessionId: null, windowStart: Date.now(), count: 0 });
+  const releaseIp = (ip: string) => {
+    const left = (connectionsByIp.get(ip) ?? 1) - 1;
+    if (left <= 0) connectionsByIp.delete(ip);
+    else connectionsByIp.set(ip, left);
+  };
+
+  wss.on('connection', (socket, request) => {
+    const ip = request.socket.remoteAddress ?? 'desconhecido';
+    const open = connectionsByIp.get(ip) ?? 0;
+    if (open >= maxConnectionsPerIp) {
+      socket.close(1008, 'limite de conexões');
+      return;
+    }
+    connectionsByIp.set(ip, open + 1);
+    const connectionId = randomBytes(8).toString('hex');
+    isAlive.set(socket, true);
+    socket.on('error', () => undefined);
+    states.set(socket, { sessionId: null, windowStart: now(), count: 0, connectionId, ip });
+    socket.on('pong', () => {
+      isAlive.set(socket, true);
+    });
     socket.on('message', (data, isBinary) => {
       const state = states.get(socket);
       if (!state) return;
-      const now = Date.now();
-      if (now - state.windowStart > 1000) {
-        state.windowStart = now;
+      const stamp = now();
+      if (stamp - state.windowStart > 1000) {
+        state.windowStart = stamp;
         state.count = 0;
       }
       state.count += 1;
@@ -145,7 +212,19 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
         sendJson(socket, { type: 'error', code: 'auth', message: 'Entre com nick e código de convite.' });
         return;
       }
-      const result = dispatch(message, state.sessionId);
+      if (message.type === 'hello' && inviteBlocked(state, message.inviteCode)) {
+        sendJson(socket, {
+          type: 'error',
+          code: 'convite_bloqueado',
+          message: 'Muitas tentativas de convite. Espere um pouco e tente de novo.',
+        });
+        return;
+      }
+      const result = dispatch(message, state);
+      if (!result.ok && result.code === 'convite' && message.type === 'hello') {
+        invites.strike(`ip:${state.ip}`);
+        invites.strike(`conn:${state.connectionId}`);
+      }
       if (!result.ok) {
         sendJson(socket, { type: 'error', code: result.code, message: result.message });
         broadcast();
@@ -160,6 +239,7 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
       broadcast();
     });
     socket.on('close', () => {
+      releaseIp(ip);
       const state = states.get(socket);
       states.delete(socket);
       if (!state?.sessionId) return;
@@ -171,22 +251,27 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
     });
   });
 
-  function dispatch(message: Exclude<ReturnType<typeof parseClientMessage>, null>, sessionId: string | null) {
+  function inviteBlocked(state: SockState, inviteCode: string | undefined): boolean {
+    if (!inviteCode || inviteCode.trim() === '') return false;
+    return invites.blocked(`ip:${state.ip}`) || invites.blocked(`conn:${state.connectionId}`);
+  }
+
+  function dispatch(message: Exclude<ReturnType<typeof parseClientMessage>, null>, state: SockState) {
     switch (message.type) {
       case 'hello':
-        return hub.hello(message.nick, message.inviteCode);
+        return hub.hello(message.nick, message.inviteCode, state.connectionId);
       case 'resume':
-        return hub.resume(message.sessionId, message.token);
+        return hub.resume(message.sessionId, message.token, state.connectionId);
       case 'magic':
         return { ok: false as const, code: 'magic_link_futuro', message: 'Magic link fica para uma versão futura.' };
       case 'lobby':
-        return hub.lobby(sessionId ?? '', message.ready, message.base);
+        return hub.lobby(state.sessionId ?? '', message.ready, message.base);
       case 'command':
-        return hub.command(sessionId ?? '', message.command);
+        return hub.command(state.sessionId ?? '', message.command);
       case 'rematch':
-        return hub.rematch(sessionId ?? '');
+        return hub.rematch(state.sessionId ?? '');
       case 'ranking':
-        return hub.ranking(sessionId ?? '');
+        return hub.ranking(state.sessionId ?? '');
       default: {
         const neverMessage: never = message;
         return { ok: false as const, code: 'protocolo', message: `Mensagem não tratada: ${JSON.stringify(neverMessage)}` };
@@ -199,18 +284,31 @@ export function startServer(options: StartOptions): Promise<RunningServer> {
     broadcast();
   }, intervalMs);
 
+  const heartbeat = setInterval(() => {
+    for (const socket of wss.clients) {
+      if (socket.readyState !== socket.OPEN) continue;
+      if (isAlive.get(socket) === false) {
+        socket.terminate();
+        continue;
+      }
+      isAlive.set(socket, false);
+      socket.ping();
+    }
+  }, heartbeatMs);
+
   return new Promise((resolve, reject) => {
-    httpServer.once('error', reject);
-    httpServer.listen(options.port, host, () => {
-      const address = httpServer.address();
+    server.once('error', reject);
+    server.listen(options.port, host, () => {
+      const address = server.address();
       const port = address && typeof address === 'object' ? address.port : options.port;
       resolve({
         port,
         host,
         close: () => new Promise((done, fail) => {
           clearInterval(timer);
+          clearInterval(heartbeat);
           wss.close();
-          httpServer.close((error) => (error ? fail(error) : done()));
+          server.close((error) => (error ? fail(error) : done()));
         }),
       });
     });

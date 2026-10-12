@@ -316,6 +316,7 @@ export class Match {
     if (this.phase !== 'combat' && this.phase !== 'summary' && this.phase !== 'pack') {
       return fail('A bomba não pode ser usada agora.');
     }
+    if (x < 0 || y < 0 || x > rules.W || y > rules.H) return fail('Fora do mapa.');
     const side = this.side(seat);
     if (side.gold < rules.BOMB_COST || side.bombCd > 0) return fail('Bomba indisponível.');
     const onOwnHalf = seat === 'left' ? x < rules.MID : x > rules.MID;

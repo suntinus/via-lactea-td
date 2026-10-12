@@ -31,6 +31,20 @@ test('monstros só nascem depois que os dois packs foram enviados', () => {
   assert.ok(live.right.enemies.some((enemy) => enemy.type === 'boss' || enemy.type === 'predador' || enemy.type === 'alien'));
 });
 
+test('a bomba recusa coordenada fora do mapa e não gasta moedas', () => {
+  const match = new Match({ seed: 5, base: 'lunar' });
+  const far = match.command({ seat: 'left', kind: 'bomb', x: 5000, y: 40 });
+  assert.equal(far.ok, false);
+  assert.equal(far.reason, 'Fora do mapa.');
+  const negative = match.command({ seat: 'left', kind: 'bomb', x: -1, y: 40 });
+  assert.equal(negative.ok, false);
+  assert.equal(match.snapshot().left.gold, 90);
+  assert.equal(match.snapshot().left.bombCd, 0);
+  const boom = match.command({ seat: 'left', kind: 'bomb', x: 40, y: 40 });
+  assert.equal(boom.ok, true);
+  assert.equal(match.snapshot().left.gold, 40);
+});
+
 test('o lado que recebe o enxame leve perde a base', () => {
   const match = new Match({ seed: 11, base: 'terra' });
   let guard = 0;

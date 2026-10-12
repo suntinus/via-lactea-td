@@ -89,9 +89,15 @@ npm install
 npm run dev
 ```
 
-Abra `http://127.0.0.1:8030/game.html`, escolha **Multijogador → Amigo**, crie a sala e envie o link `?convite=CODIGO`. O amigo entra com o código e um nick. Os dois ficam prontos, escolhem packs e jogam. Se a conexão cair, a partida pausa cerca de 45s e aceita o mesmo token de sessão.
+Abra `http://127.0.0.1:8030/game.html`, escolha **Multijogador → Amigo**, crie a sala e envie o link `?convite=CODIGO`. O amigo entra com o código e um nick. Os dois ficam prontos, escolhem packs e jogam. Se a conexão cair, a partida pausa e aceita o mesmo token de sessão. O prazo de 45s é fixado na primeira queda da partida: reconectar não zera o relógio. Cada jogador tem até 3 pausas e 3 reconexões; a seguinte é W.O.
+
+O servidor manda `ping` a cada 25s e encerra quem não responde `pong`. Mensagens maiores que 8192 bytes são recusadas. Salas paradas, vazias ou já encerradas expiram. Há limite de salas por conexão, de conexões por IP e de tentativas erradas de convite.
 
 Login desta versão: **código de convite + nick**. Magic link fica para uma versão futura.
+
+### Exemplo nginx (não aplicado)
+
+`docs/nginx-wss.example.conf` mostra um proxy TLS com `wss`, upgrade de WebSocket e timeouts de leitura/escrita para um deploy futuro. Nada disso está ligado no servidor nem na VPS.
 
 ```bash
 npm test

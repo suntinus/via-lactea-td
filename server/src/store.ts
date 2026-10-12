@@ -40,11 +40,16 @@ function nickKey(nick: string): string {
 }
 
 export class RankStore {
-  constructor(private readonly filePath: string) {}
+  private data: FileShape;
+  private saved: string;
+
+  constructor(private readonly filePath: string) {
+    this.data = this.read();
+    this.saved = JSON.stringify(this.data);
+  }
 
   record(code: string, entries: RankOutcome[], wave: number): RankingRow[] {
-    const data = this.read();
-    const circle = data.circles[code] ?? { players: {}, matches: [] };
+    const circle = this.data.circles[code] ?? { players: {}, matches: [] };
     for (const entry of entries) {
       const key = nickKey(entry.nick);
       const row = circle.players[key] ?? {
@@ -69,19 +74,26 @@ export class RankStore {
       scores: entries.map((entry) => ({ nick: entry.nick, score: entry.score })),
     });
     circle.matches = circle.matches.slice(-40);
-    data.circles[code] = circle;
-    this.write(data);
+    this.data.circles[code] = circle;
+    this.persist();
     return this.rows(circle);
   }
 
   ranking(code: string): RankingRow[] {
-    const circle = this.read().circles[code];
+    const circle = this.data.circles[code];
     if (!circle) return [];
     return this.rows(circle);
   }
 
   private rows(circle: Circle): RankingRow[] {
     return Object.values(circle.players).sort((a, b) => b.wins - a.wins || b.points - a.points || a.nick.localeCompare(b.nick, 'pt-BR'));
+  }
+
+  private persist(): void {
+    const next = JSON.stringify(this.data);
+    if (next === this.saved) return;
+    this.saved = next;
+    this.write(next);
   }
 
   private read(): FileShape {
@@ -95,10 +107,10 @@ export class RankStore {
     }
   }
 
-  private write(data: FileShape): void {
+  private write(body: string): void {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const tmp = `${this.filePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(data));
+    fs.writeFileSync(tmp, body);
     fs.renameSync(tmp, this.filePath);
   }
 }

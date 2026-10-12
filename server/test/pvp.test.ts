@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import WebSocket from 'ws';
-import { startServer, type RunningServer } from '../src/server.js';
+import { DEFAULT_HEARTBEAT_MS, startServer, type RunningServer, type StartOptions } from '../src/server.js';
 
 interface Welcome {
   type: 'welcome';
@@ -19,6 +19,7 @@ interface View {
   youNick: string;
   opponentNick: string | null;
   ranking: { nick: string; wins: number; points: number }[];
+  pause: { reason: string; secondsLeft: number } | null;
   match: null | {
     phase: string;
     winner: string | null;
@@ -41,15 +42,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+interface MutableSocket extends WebSocket {
+  _autoPong?: boolean;
+  pong: (...args: unknown[]) => void;
+}
+
 class Client {
   readonly inbox: Incoming[] = [];
   private socket: WebSocket | null = null;
+  private cursor = 0;
 
   constructor(private readonly port: number) {}
 
   async connect(): Promise<void> {
     const socket = new WebSocket(`ws://127.0.0.1:${this.port}`);
     this.socket = socket;
+    socket.on('error', () => undefined);
     socket.on('message', (data) => {
       const parsed: unknown = JSON.parse(data.toString());
       if (isRecord(parsed) && typeof parsed.type === 'string') this.inbox.push(parsed as Incoming);
@@ -64,13 +72,36 @@ class Client {
     this.socket?.send(JSON.stringify(message));
   }
 
+  rawSend(payload: string): void {
+    this.socket?.send(payload);
+  }
+
+  silencePong(): void {
+    const socket = this.socket as MutableSocket | null;
+    if (!socket) return;
+    socket._autoPong = false;
+    socket.pong = () => undefined;
+  }
+
+  onceClose(): Promise<number> {
+    const socket = this.socket;
+    if (!socket) return Promise.reject(new Error('sem socket'));
+    if (socket.readyState === socket.CLOSED) return Promise.resolve(1006);
+    return new Promise((resolve) => {
+      socket.once('close', (code: number) => resolve(code));
+    });
+  }
+
   async wait<T extends Incoming>(predicate: (message: Incoming) => message is T, timeoutMs?: number): Promise<T>;
   async wait(predicate: (message: Incoming) => boolean, timeoutMs?: number): Promise<Incoming>;
   async wait(predicate: (message: Incoming) => boolean, timeoutMs = 3000): Promise<Incoming> {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
-      const found = this.inbox.find(predicate);
-      if (found) return found;
+      while (this.cursor < this.inbox.length) {
+        const message = this.inbox[this.cursor];
+        this.cursor += 1;
+        if (predicate(message)) return message;
+      }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     throw new Error(`timeout depois de ${this.inbox.length} mensagens`);
@@ -78,7 +109,7 @@ class Client {
 
   async close(): Promise<void> {
     const socket = this.socket;
-    if (!socket) return;
+    if (!socket || socket.readyState === socket.CLOSED) return;
     await new Promise<void>((resolve) => {
       socket.once('close', () => resolve());
       socket.close();
@@ -86,7 +117,7 @@ class Client {
   }
 }
 
-async function boot(stepSec = 0.05): Promise<{ server: RunningServer; dir: string }> {
+async function boot(stepSec = 0.05, extra: Partial<StartOptions> = {}): Promise<{ server: RunningServer; dir: string }> {
   const dir = await mkdtemp(path.join(tmpdir(), 'via-lactea-'));
   const server = await startServer({
     port: 0,
@@ -94,6 +125,7 @@ async function boot(stepSec = 0.05): Promise<{ server: RunningServer; dir: strin
     staticRoot: process.cwd(),
     stepSec,
     intervalMs: 30,
+    ...extra,
   });
   return { server, dir };
 }
@@ -235,6 +267,121 @@ test('partida sincronizada grava ranking entre amigos', async () => {
     assert.ok((finished?.ranking ?? []).some((row) => row.nick === 'Ana' && row.wins >= 1));
     await host.close();
     await guest.close();
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('maxPayload 8192 recusa mensagem grande', async () => {
+  const { server, dir } = await boot();
+  try {
+    const client = new Client(server.port);
+    await client.connect();
+    client.rawSend('x'.repeat(8192));
+    const accepted = await client.wait((message): message is ErrorMessage => message.type === 'error');
+    assert.equal(accepted.code, 'json');
+    const closed = client.onceClose();
+    client.rawSend('y'.repeat(8193));
+    assert.equal(await closed, 1009);
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('heartbeat de 25s encerra quem não responde pong e a queda vira pausa e W.O.', async () => {
+  assert.equal(DEFAULT_HEARTBEAT_MS, 25_000);
+  const { server, dir } = await boot(0.05, { heartbeatMs: 300, reconnectMs: 900, intervalMs: 40 });
+  try {
+    const host = new Client(server.port);
+    const guest = new Client(server.port);
+    await host.connect();
+    await guest.connect();
+    host.send({ type: 'hello', nick: 'Ana' });
+    const welcome = await host.wait((message): message is Welcome => message.type === 'welcome');
+    guest.send({ type: 'hello', nick: 'Bia', inviteCode: welcome.view.inviteCode });
+    await guest.wait((message): message is Welcome => message.type === 'welcome');
+    host.send({ type: 'lobby', ready: true, base: 'terra' });
+    guest.send({ type: 'lobby', ready: true });
+    await host.wait((message) => message.type === 'state' && message.view.match !== null);
+    guest.silencePong();
+    const paused = await host.wait((message) => message.type === 'state' && message.view.pause !== null, 5000);
+    assert.equal(paused.type, 'state');
+    if (paused.type === 'state') {
+      assert.equal(paused.view.pause?.reason, 'disconnect');
+      assert.ok((paused.view.pause?.secondsLeft ?? 0) > 0);
+    }
+    const ended = await host.wait((message) => message.type === 'state' && message.view.match?.winner === 'you', 5000);
+    assert.equal(ended.type, 'state');
+    if (ended.type === 'state') assert.equal(ended.view.match?.winner, 'you');
+    await host.close();
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('limite de conexões por IP e de salas por conexão', async () => {
+  const { server, dir } = await boot(0.05, { maxConnectionsPerIp: 2 });
+  try {
+    const first = new Client(server.port);
+    const second = new Client(server.port);
+    await first.connect();
+    await second.connect();
+    const third = new WebSocket(`ws://127.0.0.1:${server.port}`);
+    third.on('error', () => undefined);
+    const code = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('a terceira conexão não fechou')), 3000);
+      third.once('close', (closeCode: number) => {
+        clearTimeout(timer);
+        resolve(closeCode);
+      });
+    });
+    assert.equal(code, 1008);
+    await first.close();
+    await second.close();
+
+    const host = new Client(server.port);
+    await host.connect();
+    host.send({ type: 'hello', nick: 'Ana' });
+    await host.wait((message): message is Welcome => message.type === 'welcome');
+    host.send({ type: 'hello', nick: 'Outra' });
+    const limited = await host.wait((message): message is ErrorMessage => message.type === 'error' && message.code === 'limite_salas');
+    assert.equal(limited.code, 'limite_salas');
+    await host.close();
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('convites errados bloqueiam a conexão e o IP', async () => {
+  const { server, dir } = await boot(0.05, { inviteMaxFails: 2, inviteWindowMs: 60_000, inviteBlockMs: 60_000 });
+  try {
+    const host = new Client(server.port);
+    const guest = new Client(server.port);
+    await host.connect();
+    await guest.connect();
+    host.send({ type: 'hello', nick: 'Ana' });
+    const welcome = await host.wait((message): message is Welcome => message.type === 'welcome');
+    guest.send({ type: 'hello', nick: 'Bia', inviteCode: 'NOPE00' });
+    const first = await guest.wait((message): message is ErrorMessage => message.type === 'error');
+    assert.equal(first.code, 'convite');
+    guest.send({ type: 'hello', nick: 'Bia', inviteCode: 'NOPE01' });
+    const second = await guest.wait((message): message is ErrorMessage => message.type === 'error');
+    assert.equal(second.code, 'convite');
+    guest.send({ type: 'hello', nick: 'Bia', inviteCode: welcome.view.inviteCode });
+    const blocked = await guest.wait((message): message is ErrorMessage => message.type === 'error');
+    assert.equal(blocked.code, 'convite_bloqueado');
+    const other = new Client(server.port);
+    await other.connect();
+    other.send({ type: 'hello', nick: 'Caio', inviteCode: welcome.view.inviteCode });
+    const byIp = await other.wait((message): message is ErrorMessage => message.type === 'error');
+    assert.equal(byIp.code, 'convite_bloqueado');
+    await host.close();
+    await guest.close();
+    await other.close();
   } finally {
     await server.close();
     await rm(dir, { recursive: true, force: true });
