@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Via Láctea TD",
-  "version": "0.5.0",
-  "description": "Via Láctea TD — Solo clássico ou Multijogador vs IA estilo Warcraft TD. Torres Laser, Escudo e Sonda contra UFOs, aliens e asteroides.",
+  "version": "0.6.0",
+  "description": "Via Láctea TD by Suntinus — Solo, vs IA ou PvP online. Torres Laser, Escudo e Sonda contra UFOs, aliens e asteroides.",
   "action": {
     "default_title": "Via Láctea TD",
     "default_popup": "popup.html",

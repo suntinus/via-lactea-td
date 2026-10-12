@@ -9,7 +9,14 @@ e este projeto segue [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Added
 
-- Espaço reservado para as próximas mudanças.
+- Regras compartilhadas em `shared/rules.js` (cliente e servidor).
+- A IA do vs local compra escudo com HP baixo e escolhe upgrades nos marcos de ouro.
+- O preview da próxima onda conta 2 chefões a partir da onda 10.
+- O rank local mostra as 10 melhores partidas.
+
+### Changed
+
+- Marca do produto: **Via Láctea TD by Suntinus**. Spike documentado como **G-456**.
 
 ## [0.5.0] - 2026-09-27
 

@@ -1,0 +1,27 @@
+{
+  "name": "via-lactea-td",
+  "version": "0.6.0",
+  "private": true,
+  "description": "Via Láctea TD by Suntinus — torre defense espacial, solo, vs IA e PvP online.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx server/src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test shared/rules.test.js && node --import tsx --test server/test/**/*.test.ts",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "@types/node": "^22.18.6",
+    "@types/ws": "^8.18.1",
+    "eslint": "^9.36.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.44.0"
+  }
+}

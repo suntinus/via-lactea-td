@@ -1,12 +1,12 @@
-# Via Láctea TD
+# Via Láctea TD by Suntinus
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.5.0--alpha-orange.svg)](https://github.com/suntinus/via-lactea-td/releases/tag/v0.5.0-alpha)
+[![Version](https://img.shields.io/badge/version-0.6.0--alpha-orange.svg)](https://github.com/suntinus/via-lactea-td)
 [![Platform](https://img.shields.io/badge/Chrome-MV3-green.svg)](https://developer.chrome.com/docs/extensions/mv3/)
 
 Tower defense espacial em **Canvas 2D**, distribuído como extensão Chrome (Manifest V3) e jogável na web. Tema inspirado em Super Trunfo: cartas de força, aliens, UFOs, vírus e chefões asteroide.
 
-**Suntinus** · spike G-452 · alpha público.
+**Via Láctea TD by Suntinus** · evolução G-456 · alpha público.
 
 | | |
 |---|---|
@@ -83,7 +83,7 @@ No vs IA: plantio só na metade esquerda; escolha de pack antes de cada onda.
 - [x] Repo público + release zip + Pages
 - [ ] Amigo online
 - [ ] Mais cartas Super Trunfo / chefões
-- [ ] Go / no-go do spike G-452 após playtests externos
+- [ ] Go / no-go do spike G-456 após playtests externos
 
 ## Contribuir
 
