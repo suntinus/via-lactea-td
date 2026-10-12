@@ -393,13 +393,23 @@
 
   function renderRank() {
     const list = loadRank();
+    rankList.replaceChildren();
     if (!list.length) {
-      rankList.innerHTML = '<li class="empty">Sem partidas ainda</li>';
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = 'Sem partidas ainda';
+      rankList.append(empty);
     } else {
-      rankList.innerHTML = list
-        .slice(0, 10)
-        .map((e, i) => `<li>#${i + 1} ${e.score} pts · onda ${e.wave} <span style="opacity:.5">${e.mode === 'vsIA' ? 'vsIA' : e.base || ''} ${e.date || ''}</span></li>`)
-        .join('');
+      list.slice(0, 10).forEach((entry, index) => {
+        const item = document.createElement('li');
+        item.append(document.createTextNode(`#${index + 1} ${entry.score} pts · onda ${entry.wave} `));
+        const meta = document.createElement('span');
+        meta.style.opacity = '0.5';
+        const mode = entry.mode === 'vsIA' ? 'vsIA' : (entry.base || '');
+        meta.textContent = `${mode} ${entry.date || ''}`.trim();
+        item.append(meta);
+        rankList.append(item);
+      });
     }
     recordeEl.textContent = `Recorde: ${bestScore()}`;
   }
@@ -640,23 +650,30 @@
     updateActionButtons();
   }
 
+  function appendSummaryStat(parent, label, value) {
+    const wrap = document.createElement('div');
+    wrap.className = 'summary-stat';
+    wrap.append(document.createTextNode(label));
+    const strong = document.createElement('strong');
+    strong.textContent = value;
+    wrap.append(strong);
+    parent.append(wrap);
+  }
+
   function updateWaveSummaryDisplay() {
     const summary = state.nextWaveSummary;
     if (!summary) return;
+    waveSummaryStats.replaceChildren();
     if (isVs()) {
-      waveSummaryStats.innerHTML = [
-        `<div class="summary-stat">Seu ouro<strong>+$${summary.gold}</strong></div>`,
-        `<div class="summary-stat">Sua pontuação<strong>+${summary.score}</strong></div>`,
-        `<div class="summary-stat">Pack IA<strong>${summary.aiPack || '—'}</strong></div>`,
-        `<div class="summary-stat">Próxima<strong>${summary.difficulty}</strong></div>`,
-      ].join('');
+      appendSummaryStat(waveSummaryStats, 'Seu ouro', `+$${summary.gold}`);
+      appendSummaryStat(waveSummaryStats, 'Sua pontuação', `+${summary.score}`);
+      appendSummaryStat(waveSummaryStats, 'Pack IA', summary.aiPack || '—');
+      appendSummaryStat(waveSummaryStats, 'Próxima', String(summary.difficulty));
     } else {
-      waveSummaryStats.innerHTML = [
-        `<div class="summary-stat">Ouro ganho<strong>+$${summary.gold}</strong></div>`,
-        `<div class="summary-stat">Pontuação<strong>+${summary.score}</strong></div>`,
-        `<div class="summary-stat">Próxima dificuldade<strong>${summary.difficulty}</strong></div>`,
-        `<div class="summary-stat">Inimigos<strong>${summary.enemyCount}</strong></div>`,
-      ].join('');
+      appendSummaryStat(waveSummaryStats, 'Ouro ganho', `+$${summary.gold}`);
+      appendSummaryStat(waveSummaryStats, 'Pontuação', `+${summary.score}`);
+      appendSummaryStat(waveSummaryStats, 'Próxima dificuldade', String(summary.difficulty));
+      appendSummaryStat(waveSummaryStats, 'Inimigos', String(summary.enemyCount));
     }
     const seconds = Math.max(0, Math.ceil(summary.remaining));
     waveSummaryCountdown.textContent = `${paused ? 'Pausado · ' : ''}Próxima onda em ${seconds}s`;
@@ -1725,13 +1742,19 @@
       return;
     }
     box.hidden = false;
+    list.replaceChildren();
     if (!rows.length) {
-      list.innerHTML = '<li class="empty">Sem partidas entre amigos</li>';
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = 'Sem partidas entre amigos';
+      list.append(empty);
       return;
     }
-    list.innerHTML = rows.slice(0, 10).map((row, index) => (
-      `<li>#${index + 1} ${row.nick} · ${row.wins}V ${row.losses}D · ${row.points} pts</li>`
-    )).join('');
+    rows.slice(0, 10).forEach((row, index) => {
+      const item = document.createElement('li');
+      item.textContent = `#${index + 1} ${row.nick} · ${row.wins}V ${row.losses}D · ${row.points} pts`;
+      list.append(item);
+    });
   }
 
   function applyOnlineSnapshot(view) {
@@ -1786,7 +1809,9 @@
       state.nextWaveSummary = { remaining: match.summarySeconds };
       waveSummary.classList.add('open');
       waveSummaryCountdown.textContent = `Próxima onda em ${Math.ceil(match.summarySeconds)}s`;
-      waveSummaryStats.innerHTML = `<div class="summary-stat">Onda<strong>${match.wave}</strong></div><div class="summary-stat">Seu ouro<strong>$${match.you.gold}</strong></div>`;
+      waveSummaryStats.replaceChildren();
+      appendSummaryStat(waveSummaryStats, 'Onda', String(match.wave));
+      appendSummaryStat(waveSummaryStats, 'Seu ouro', `$${match.you.gold}`);
     } else {
       state.nextWaveSummary = null;
       waveSummary.classList.remove('open');

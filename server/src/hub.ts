@@ -1,11 +1,26 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import rules from '../../shared/rules.js';
 import type { ClientCommand } from './protocol.js';
 import { Match, type BaseId, type Intent, type MatchSnap, type Seat, type SideSnap } from './sim.js';
 import { RankStore, type RankingRow } from './store.js';
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const NICK_RE = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,15}$/u;
+const NICK_MAX = 16;
+
+function acceptNick(raw: string): string | null {
+  const nick = raw.normalize('NFKC').trim();
+  if (nick.length < 1 || nick.length > NICK_MAX) return null;
+  let first = true;
+  for (const char of nick) {
+    if (first) {
+      if (!/^[\p{L}\p{N}]$/u.test(char)) return null;
+      first = false;
+      continue;
+    }
+    if (!/^[\p{L}\p{N} _-]$/u.test(char)) return null;
+  }
+  return nick;
+}
 
 export interface HubOptions {
   now?: () => number;
@@ -112,8 +127,9 @@ export type HubResult =
   | { ok: false; code: string; message: string };
 
 function makeCode(): string {
-  const bytes = randomBytes(6);
-  return [...bytes].map((byte) => ALPHABET[byte % ALPHABET.length]).join('');
+  let code = '';
+  for (let index = 0; index < 6; index += 1) code += ALPHABET[randomInt(ALPHABET.length)];
+  return code;
 }
 
 function makeId(): string {
@@ -156,8 +172,8 @@ export class Hub {
   }
 
   hello(nickRaw: string, inviteCode?: string, connectionId?: string, playerId?: string): HubResult {
-    const nick = nickRaw.trim();
-    if (!NICK_RE.test(nick)) {
+    const nick = acceptNick(nickRaw);
+    if (!nick) {
       return { ok: false, code: 'nick', message: 'Nick precisa ter 1 a 16 caracteres (letras, números, espaço, _ ou -).' };
     }
     const stableId = this.resolvePlayerId(playerId);
