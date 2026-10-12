@@ -9,6 +9,8 @@ e este projeto segue [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Added
 
+- Servidor WebSocket autoritativo (Node/TypeScript) em `127.0.0.1` e `PORT` (padrão 8030): lobby, convite por link, moedas, envio de monstros, reconexão e ranking entre amigos.
+- Login da primeira versão: código de convite + nick. Magic link permanece como opção futura.
 - Regras compartilhadas em `shared/rules.js` (cliente e servidor).
 - A IA do vs local compra escudo com HP baixo e escolhe upgrades nos marcos de ouro.
 - O preview da próxima onda conta 2 chefões a partir da onda 10.

@@ -68,8 +68,13 @@
     .pick .badge { display: inline-block; margin-top: 6px; font-size: 10px; background: #3d2a6e; padding: 2px 8px; border-radius: 999px; opacity: 1; }
     .diff-row { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; flex-wrap: wrap; }
     .diff-row button.active { outline: 2px solid #f0c14a; }
-    .setup-solo, .setup-mp { display: none; }
-    .setup-solo.show, .setup-mp.show { display: block; }
+    .setup-solo, .setup-mp, .setup-online { display: none; }
+    .setup-solo.show, .setup-mp.show, .setup-online.show { display: block; }
+    .setup-online { text-align: left; }
+    .setup-online input { width: 100%; box-sizing: border-box; margin: 4px 0 10px; padding: 8px;
+      border: 0; border-radius: 8px; background: #1a2240; color: #fff; font-size: 14px; }
+    .setup-online .status { min-height: 1.2em; font-size: 12px; color: #f0c14a; }
+    .setup-online .link { font-size: 12px; word-break: break-all; opacity: .85; }
     .summary-card { text-align: center; border-color: #4ade80; width: min(430px, 92vw); }
     .summary-card h2 { margin: 0 0 14px; font-size: 22px; }
     .summary-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
@@ -154,6 +159,10 @@
       <h2>Rank</h2>
       <ol id="rankList"><li class="empty">Sem partidas ainda</li></ol>
       <div class="rec" id="recorde">Recorde: 0</div>
+      <div class="card-stats" id="friendRankBox" hidden>
+        <strong>Ranking entre amigos</strong>
+        <ol id="friendRank"></ol>
+      </div>
       <div class="card-stats" id="towerCard">
         <strong>Carta selecionada</strong><br />
         Escolha uma torre para ver Força · Alcance · Cadência
@@ -190,11 +199,11 @@
             <strong>vs IA</strong>
             <span>Local · tela dividida<br />Você à esquerda, IA à direita</span>
           </button>
-          <button type="button" class="pick stub" data-mp="amigo" id="pickAmigo" disabled title="Em breve">
+          <button type="button" class="pick" data-mp="amigo" id="pickAmigo">
             <span class="emoji">👥</span>
             <strong>Amigo</strong>
-            <span>Online com um amigo</span>
-            <span class="badge">Em breve</span>
+            <span>Online · código de convite e nick</span>
+            <span class="badge">PvP</span>
           </button>
         </div>
       </div>
@@ -241,6 +250,37 @@
           <button type="button" class="chip" data-diff-mp="dificil">Difícil</button>
         </div>
         <button type="button" class="primary" id="btnBeginMp" style="width:100%;padding:12px;font-size:15px">Começar vs IA</button>
+      </div>
+
+      <div class="setup-online" id="setupOnline">
+        <h3 style="margin:0 0 8px;font-size:13px;opacity:.8">Amigo online · código + nick</h3>
+        <label>Nick
+          <input id="onlineNick" maxlength="16" autocomplete="nickname" placeholder="Seu nick" />
+        </label>
+        <label>Código de convite
+          <input id="onlineCode" maxlength="6" autocapitalize="characters" placeholder="Vazio para criar sala" />
+        </label>
+        <div class="pick-row" id="onlineBases">
+          <button type="button" class="pick active" data-base-online="terra">
+            <span class="emoji">🌍</span>
+            <strong>Terra</strong>
+            <span>O anfitrião escolhe a base</span>
+          </button>
+          <button type="button" class="pick" data-base-online="lunar">
+            <span class="emoji">🌙</span>
+            <strong>Lunar</strong>
+            <span>Menos HP, mais ouro</span>
+          </button>
+        </div>
+        <div class="row">
+          <button type="button" class="primary" id="btnOnlineCreate">Criar sala</button>
+          <button type="button" id="btnOnlineJoin">Entrar com código</button>
+          <button type="button" id="btnOnlineReady">Ficar pronto</button>
+        </div>
+        <p class="status" id="onlineStatus">Magic link fica para uma versão futura.</p>
+        <p class="link" id="onlineLink"></p>
+        <button type="button" id="btnOnlineCopy">Copiar link de convite</button>
+        <p class="hint" id="onlinePlayers"></p>
       </div>
     </div>
   </div>
@@ -294,5 +334,6 @@
   </div>
   <script src="shared/rules.js"></script>
   <script src="game.js"></script>
+  <script src="online.js"></script>
 </body>
 </html>

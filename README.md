@@ -41,13 +41,14 @@ Defesa clássica contra ondas scriptadas.
 - **vs IA** (local): tela dividida; ouro e HP separados
 - Antes de cada onda, cada lado escolhe um pack de ataque (**leve / mista / pesada**) e envia à pista do oponente — estilo Warcraft TD
 - Primeira base a 0 HP perde
-- **Amigo (online):** em breve
+- **Amigo (online):** convite por link, lobby, partida sincronizada e ranking entre amigos
 
 ## Stack
 
 - Canvas 2D puro (sem framework de jogo, sem Three.js)
 - Chrome Extension Manifest V3
-- `localStorage` para rank
+- `localStorage` para rank solo
+- Servidor WebSocket em Node/TypeScript (`npm run dev`), estado autoritativo
 - Português (pt-BR) na UI
 
 ## Instalação rápida
@@ -77,13 +78,38 @@ Abra a [demo no GitHub Pages](https://suntinus.github.io/via-lactea-td/game.html
 
 No vs IA: plantio só na metade esquerda; escolha de pack antes de cada onda.
 
+No amigo online a regra é a mesma, mas moedas, packs e o resultado vêm do servidor. Você sempre aparece à esquerda.
+
+## Amigo online (local)
+
+O servidor escuta só em `127.0.0.1`. A porta vem de `PORT` (padrão **8030**, reservada no `PORTS.md` do holding). `HOST` diferente de `127.0.0.1` é recusado.
+
+```bash
+npm install
+npm run dev
+```
+
+Abra `http://127.0.0.1:8030/game.html`, escolha **Multijogador → Amigo**, crie a sala e envie o link `?convite=CODIGO`. O amigo entra com o código e um nick. Os dois ficam prontos, escolhem packs e jogam. Se a conexão cair, a partida pausa cerca de 45s e aceita o mesmo token de sessão.
+
+Login desta versão: **código de convite + nick**. Magic link fica para uma versão futura.
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+Não há deploy na VPS neste passo. Sobe em produção só com GO do founder.
+
 ## Roadmap (alpha)
 
 - [x] Solo jogável + Multijogador vs IA
 - [x] Repo público + release zip + Pages
-- [ ] Amigo online
+- [x] Amigo online (servidor WebSocket local, sem deploy)
 - [ ] Mais cartas Super Trunfo / chefões
+- [ ] Magic link (fica para uma versão futura; hoje o login é código de convite + nick)
 - [ ] Go / no-go do spike G-456 após playtests externos
+- [ ] Deploy na VPS — só com GO do founder
 
 ## Contribuir
 
