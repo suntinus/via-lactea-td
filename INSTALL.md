@@ -21,4 +21,5 @@ Se o GitHub Pages estiver ligado neste repo, abra:
 ## Notas
 
 - Manifest V3, pasta histórica `virtue-tower-ext` no disco local; produto = **Via Láctea TD**.
-- Alpha: Solo + Multijogador vs IA. Online amigo = em breve.
+- Alpha: Solo + Multijogador vs IA + amigo online local.
+- Online: `npm install && npm run dev` e abra `http://127.0.0.1:8030/game.html`. Sem deploy na VPS até o GO do founder. O exemplo `docs/nginx-wss.example.conf` não está aplicado.

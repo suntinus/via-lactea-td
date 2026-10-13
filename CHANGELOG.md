@@ -9,7 +9,22 @@ e este projeto segue [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Added
 
-- Espaço reservado para as próximas mudanças.
+- Servidor WebSocket autoritativo (Node/TypeScript) em `127.0.0.1` e `PORT` (padrão 8030): lobby, convite por link, moedas, envio de monstros, reconexão e ranking entre amigos.
+- Limites do servidor: `maxPayload` de 8192 bytes, ping a cada 25s, TTL de salas, teto de conexões por IP e de salas por conexão, bloqueio temporário de convites errados, teto de pausas e reconexões por partida.
+- Ranking do círculo fica em memória e só é gravado em `circles.json` quando muda. A chave é um id estável do jogador, persistido no navegador, e não o nick.
+- O limite por IP e o bloqueio de convite usam `X-Forwarded-For` ou `X-Real-IP` apenas quando a conexão chega de um proxy em loopback.
+- Nick online só entra se passar na allowlist (1 a 16 letras, números, espaço, `_` ou `-`). Listas e resumos do jogo escrevem texto com `textContent`, sem interpolar HTML.
+- Código de convite gerado com `crypto.randomInt`, sem viés de módulo.
+- Exemplo de nginx com `wss` e timeouts em `docs/nginx-wss.example.conf` (documentado, não aplicado).
+- Login da primeira versão: código de convite + nick. Magic link permanece como opção futura.
+- Regras compartilhadas em `shared/rules.js` (cliente e servidor).
+- A IA do vs local compra escudo com HP baixo e escolhe upgrades nos marcos de ouro.
+- O preview da próxima onda conta 2 chefões a partir da onda 10.
+- O rank local mostra as 10 melhores partidas.
+
+### Changed
+
+- Marca do produto: **Via Láctea TD by Suntinus**. Spike documentado como **G-456**.
 
 ## [0.5.0] - 2026-09-27
 

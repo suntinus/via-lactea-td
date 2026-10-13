@@ -1,9 +1,12 @@
 /**
- * Via Láctea TD v0.5.0
+ * Via Láctea TD by Suntinus v0.6.0
  * Solo = clássico (ondas scriptadas). Multijogador = vs IA (packs de ataque, tela dividida).
  * Modos separados — regras não se misturam.
  */
 (() => {
+  const R = globalThis.ViaLacteaRules;
+  if (!R) throw new Error('shared/rules.js precisa carregar antes de game.js');
+
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
   const statsEl = document.getElementById('stats');
@@ -45,166 +48,36 @@
   const W = canvas.width;
   const H = canvas.height;
   const RANK_KEY = 'viaLacteaTdRank';
-  const VIDA_COST = 80;
-  const VIDA_BONUS = 5;
-  const BOMB_COST = 50;
-  const BOMB_RADIUS = 70;
-  const FREEZE_COST = 40;
-  const FREEZE_DURATION = 3;
-  const HERO_COST = 100;
-  const UPGRADE_MILESTONE = 150;
-  const UPGRADE_CAP = 3;
+  const VIDA_COST = R.VIDA_COST;
+  const VIDA_BONUS = R.VIDA_BONUS;
+  const BOMB_COST = R.BOMB_COST;
+  const BOMB_RADIUS = R.BOMB_RADIUS;
+  const FREEZE_COST = R.FREEZE_COST;
+  const FREEZE_DURATION = R.FREEZE_DURATION;
+  const HERO_COST = R.HERO_COST;
+  const UPGRADE_MILESTONE = R.UPGRADE_MILESTONE;
+  const UPGRADE_CAP = R.UPGRADE_CAP;
   const MID = W / 2;
 
-  const BASES = {
-    terra: { name: 'Planeta Terra', label: 'Terra', emoji: '🌍', hp: 24, gold: 60 },
-    lunar: { name: 'Base Lunar', label: 'Lunar', emoji: '🌙', hp: 16, gold: 90 },
-  };
-
-  const DIFFS = {
-    facil: { label: 'Fácil', hpMul: 0.75, speedMul: 0.85, goldMul: 1.15 },
-    normal: { label: 'Normal', hpMul: 1, speedMul: 1, goldMul: 1 },
-    dificil: { label: 'Difícil', hpMul: 1.35, speedMul: 1.15, goldMul: 0.9 },
-  };
-
-  const TOWERS = {
-    laser: {
-      name: 'Laser', cost: 25, range: 95, rate: 0.6, damage: 1,
-      color: '#7dd3fc', glyph: '⚡', forca: 2, alcance: 4, cadencia: 4, slow: 0,
-    },
-    escudo: {
-      name: 'Escudo', cost: 35, range: 72, rate: 0.4, damage: 2,
-      color: '#a78bfa', glyph: '🛡', forca: 4, alcance: 2, cadencia: 2, slow: 0.45,
-    },
-    sonda: {
-      name: 'Sonda', cost: 45, range: 115, rate: 0.28, damage: 3,
-      color: '#4ade80', glyph: '📡', forca: 5, alcance: 5, cadencia: 1, slow: 0,
-    },
-    hero: {
-      name: 'Herói', cost: HERO_COST, range: 90, rate: 0.22, damage: 4,
-      color: '#f0c14a', glyph: '🚀', forca: 5, alcance: 3, cadencia: 1, slow: 0, aoe: 55,
-    },
-  };
-
-  const UPGRADE_OPTIONS = [
-    { id: 'laser-range', title: 'Laser · Alcance', description: '+5% alcance para todas as torres Laser', apply(side) { side.upgrades.laser.range *= 1.05; } },
-    { id: 'laser-rate', title: 'Laser · Cadência', description: '+5% cadência para todas as torres Laser', apply(side) { side.upgrades.laser.rate *= 1.05; } },
-    { id: 'laser-damage', title: 'Laser · Força', description: '+1 dano para todas as torres Laser', apply(side) { side.upgrades.laser.damage += 1; } },
-    { id: 'escudo-range', title: 'Escudo · Alcance', description: '+5% alcance para todas as torres Escudo', apply(side) { side.upgrades.escudo.range *= 1.05; } },
-    { id: 'escudo-rate', title: 'Escudo · Cadência', description: '+5% cadência para todas as torres Escudo', apply(side) { side.upgrades.escudo.rate *= 1.05; } },
-    { id: 'escudo-damage', title: 'Escudo · Força', description: '+1 dano para todas as torres Escudo', apply(side) { side.upgrades.escudo.damage += 1; } },
-    { id: 'sonda-range', title: 'Sonda · Alcance', description: '+5% alcance para todas as torres Sonda', apply(side) { side.upgrades.sonda.range *= 1.05; } },
-    { id: 'sonda-rate', title: 'Sonda · Cadência', description: '+5% cadência para todas as torres Sonda', apply(side) { side.upgrades.sonda.rate *= 1.05; } },
-    { id: 'sonda-damage', title: 'Sonda · Força', description: '+1 dano para todas as torres Sonda', apply(side) { side.upgrades.sonda.damage += 1; } },
-    { id: 'kill-gold', title: 'Global · Ouro', description: '+5% ouro recebido de kills (máx. +15%)', apply(side) { side.upgrades.global.killGold = Math.min(1.15, side.upgrades.global.killGold + 0.05); } },
-    { id: 'max-hp', title: 'Global · Base', description: '+1 HP máximo para a base (máx. 3 vezes)', apply(side) { side.upgrades.global.maxHp += 1; side.maxHp += 1; } },
-  ];
+  const BASES = R.BASES;
+  const DIFFS = R.DIFFS;
+  const TOWERS = R.TOWERS;
+  const UPGRADE_OPTIONS = R.STAT_UPGRADES.map((option) => ({
+    id: option.id,
+    title: option.title,
+    description: option.description,
+    apply(side) { R.applyUpgradeStat(side, option.id); },
+  }));
 
   const FALLBACK_OPTIONS = [
     { id: 'bonus-gold', title: 'Bônus · Ouro', description: '+$25 ouro agora', apply(side) { addGoldTo(side, 25); } },
     { id: 'heal-hp', title: 'Bônus · Cura', description: 'Cura +2 HP da base', apply(side) { side.hp = Math.min(side.maxHp, side.hp + 2); } },
   ];
 
-  const ATTACK_PACKS = {
-    leve: {
-      id: 'leve', name: 'Força leve', emoji: '💨',
-      build(wave) {
-        const n = 6 + wave * 2;
-        const q = [];
-        for (let i = 0; i < n; i++) q.push(i % 3 === 2 ? 'virus' : 'ufo');
-        return q;
-      },
-    },
-    mista: {
-      id: 'mista', name: 'Força mista', emoji: '⚖️',
-      build(wave) {
-        const pattern = ['ufo', 'alien', 'virus', 'ufo', 'predador', 'alien'];
-        const n = 5 + wave * 2;
-        const q = [];
-        for (let i = 0; i < n; i++) q.push(pattern[i % pattern.length]);
-        if (wave >= 4 && wave % 5 !== 0) q.push('predador');
-        return q;
-      },
-    },
-    pesada: {
-      id: 'pesada', name: 'Força pesada', emoji: '🪨',
-      build(wave) {
-        const n = 4 + Math.floor(wave * 1.2);
-        const q = [];
-        for (let i = 0; i < n; i++) q.push(i % 2 === 0 ? 'predador' : 'alien');
-        q.push('boss');
-        if (wave >= 8) q.push('boss');
-        return q;
-      },
-    },
-  };
-
-  const ENEMY_TYPES = {
-    ufo: {
-      label: 'Disco voador', emoji: '🛸', letter: 'U', color: '#60a5fa', outline: '#bfdbfe',
-      hp: 3, speed: 58, reward: 10, size: 11, armor: 0, trait: 'rush',
-    },
-    alien: {
-      label: 'Alienígena', emoji: '👽', letter: 'A', color: '#4ade80', outline: '#bbf7d0',
-      hp: 5, speed: 44, reward: 12, size: 12, armor: 0, trait: 'glass',
-    },
-    predador: {
-      label: 'Predador', emoji: '👾', letter: 'P', color: '#f472b6', outline: '#fbcfe8',
-      hp: 9, speed: 30, reward: 16, size: 14, armor: 1, trait: 'tank',
-    },
-    virus: {
-      label: 'Vírus', emoji: '🦠', letter: 'V', color: '#c084fc', outline: '#e9d5ff',
-      hp: 2, speed: 72, reward: 14, size: 8, armor: 0, trait: 'glass',
-    },
-    boss: {
-      label: 'Asteroide Boss', emoji: '☄️', letter: 'B', color: '#f97316', outline: '#fed7aa',
-      hp: 28, speed: 22, reward: 45, size: 20, armor: 2, trait: 'armored',
-    },
-  };
-
-  const MAPS = {
-    orbita: {
-      a: [
-        { x: 40, y: 80 }, { x: 200, y: 80 }, { x: 320, y: 140 }, { x: 420, y: 200 },
-        { x: 540, y: 220 }, { x: 640, y: 280 }, { x: 680, y: 380 },
-      ],
-      b: [
-        { x: 40, y: 80 }, { x: 160, y: 200 }, { x: 220, y: 340 }, { x: 360, y: 400 },
-        { x: 500, y: 420 }, { x: 620, y: 400 }, { x: 680, y: 380 },
-      ],
-    },
-    nebulosa: {
-      a: [
-        { x: 30, y: 40 }, { x: 280, y: 40 }, { x: 400, y: 100 }, { x: 520, y: 60 },
-        { x: 640, y: 140 }, { x: 680, y: 260 }, { x: 600, y: 380 }, { x: 680, y: 480 },
-      ],
-      b: [
-        { x: 30, y: 40 }, { x: 100, y: 160 }, { x: 80, y: 300 }, { x: 200, y: 420 },
-        { x: 360, y: 460 }, { x: 520, y: 440 }, { x: 620, y: 480 }, { x: 680, y: 480 },
-      ],
-    },
-    asteroides: {
-      a: [
-        { x: 50, y: 60 }, { x: 300, y: 60 }, { x: 300, y: 180 }, { x: 480, y: 180 },
-        { x: 480, y: 300 }, { x: 640, y: 300 }, { x: 640, y: 440 }, { x: 690, y: 440 },
-      ],
-      b: [
-        { x: 50, y: 60 }, { x: 120, y: 200 }, { x: 120, y: 360 }, { x: 280, y: 420 },
-        { x: 420, y: 360 }, { x: 560, y: 420 }, { x: 690, y: 440 },
-      ],
-    },
-  };
-
-  const VS_PATHS = {
-    left: [
-      { x: 180, y: 36 }, { x: 90, y: 110 }, { x: 170, y: 190 }, { x: 70, y: 280 },
-      { x: 150, y: 360 }, { x: 100, y: 440 }, { x: 180, y: 500 },
-    ],
-    right: [
-      { x: 540, y: 36 }, { x: 630, y: 110 }, { x: 550, y: 190 }, { x: 650, y: 280 },
-      { x: 570, y: 360 }, { x: 620, y: 440 }, { x: 540, y: 500 },
-    ],
-  };
+  const ATTACK_PACKS = R.ATTACK_PACKS;
+  const ENEMY_TYPES = R.ENEMY_TYPES;
+  const MAPS = R.MAPS;
+  const VS_PATHS = R.VS_PATHS;
 
   const AI_BUILD_SPOTS = [
     { x: 480, y: 100 }, { x: 500, y: 180 }, { x: 470, y: 260 }, { x: 510, y: 340 },
@@ -234,6 +107,10 @@
   let freezeTimer = 0;
   let fx = [];
   let aiBuildTimer = 0;
+  let onlineActive = false;
+  let onlineSend = null;
+  let onlinePause = null;
+  let uiMp = 'vsia';
 
   function emptyUpgrades() {
     return {
@@ -332,6 +209,7 @@
   }
 
   function isVs() {
+    if (onlineActive && state && state.mode === 'online') return true;
     return gameMode === 'vsia' && state && state.mode === 'vsia';
   }
 
@@ -387,20 +265,35 @@
     vsHpWrap.style.display = vs ? 'flex' : 'none';
     mapSelect.disabled = vs || !canChangeMap();
     mapSelect.style.opacity = vs ? '0.4' : '';
-    headerHint.textContent = vs
-      ? 'Multijogador vs IA · você à esquerda, IA à direita. Antes de cada onda escolha o pack de ataque.'
-      : 'Torres fora dos dois caminhos. Espaço = pausa. Rank salva as 10 melhores partidas.';
+    headerHint.textContent = onlineActive
+      ? 'Amigo online · moedas e envios de monstros decididos no servidor. Você à esquerda.'
+      : vs
+        ? 'Multijogador vs IA · você à esquerda, IA à direita. Antes de cada onda escolha o pack de ataque.'
+        : 'Torres fora dos dois caminhos. Espaço = pausa. Rank salva as 10 melhores partidas.';
     baseLabel.textContent = vs ? 'Você' : BASES[baseKey].label;
   }
 
   function syncStartBranch() {
     const solo = uiBranch === 'solo';
+    const amigo = !solo && uiMp === 'amigo';
     setupSolo.classList.toggle('show', solo);
-    setupMp.classList.toggle('show', !solo);
+    setupMp.classList.toggle('show', !solo && !amigo);
+    const onlineBox = document.getElementById('setupOnline');
+    if (onlineBox) onlineBox.classList.toggle('show', amigo);
     stepMpKind.style.display = solo ? 'none' : 'block';
     document.getElementById('pickSolo').classList.toggle('active', solo);
     document.getElementById('pickMulti').classList.toggle('active', !solo);
+    document.querySelectorAll('[data-mp]').forEach((btn) => {
+      btn.classList.toggle('active', btn.getAttribute('data-mp') === uiMp);
+    });
   }
+
+  document.querySelectorAll('[data-mp]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      uiMp = btn.getAttribute('data-mp') || 'vsia';
+      syncStartBranch();
+    });
+  });
 
   document.querySelectorAll('[data-branch]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -455,6 +348,10 @@
 
   document.getElementById('btnWinnerOk').onclick = () => {
     winnerOverlay.classList.remove('open');
+    if (onlineActive && onlineSend) {
+      onlineSend({ type: 'rematch' });
+      return;
+    }
     resetGame();
   };
 
@@ -496,13 +393,23 @@
 
   function renderRank() {
     const list = loadRank();
+    rankList.replaceChildren();
     if (!list.length) {
-      rankList.innerHTML = '<li class="empty">Sem partidas ainda</li>';
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = 'Sem partidas ainda';
+      rankList.append(empty);
     } else {
-      rankList.innerHTML = list
-        .slice(0, 5)
-        .map((e, i) => `<li>#${i + 1} ${e.score} pts · onda ${e.wave} <span style="opacity:.5">${e.mode === 'vsIA' ? 'vsIA' : e.base || ''} ${e.date || ''}</span></li>`)
-        .join('');
+      list.slice(0, 10).forEach((entry, index) => {
+        const item = document.createElement('li');
+        item.append(document.createTextNode(`#${index + 1} ${entry.score} pts · onda ${entry.wave} `));
+        const meta = document.createElement('span');
+        meta.style.opacity = '0.5';
+        const mode = entry.mode === 'vsIA' ? 'vsIA' : (entry.base || '');
+        meta.textContent = `${mode} ${entry.date || ''}`.trim();
+        item.append(meta);
+        rankList.append(item);
+      });
     }
     recordeEl.textContent = `Recorde: ${bestScore()}`;
   }
@@ -587,6 +494,17 @@
   }
 
   function placeTower(x, y) {
+    if (onlineActive) {
+      if (!onlineSend || !state || state.over) return;
+      if (bombMode) {
+        onlineSend({ type: 'command', command: { kind: 'bomb', x, y } });
+        bombMode = false;
+        updatePowerBtns();
+        return;
+      }
+      onlineSend({ type: 'command', command: { kind: 'place', tower: selectedTower, x, y } });
+      return;
+    }
     if (!missionStarted || !state || state.over || activeSide().pendingUpgrade) return;
     if (isVs() && state.pendingPack) return;
     if (bombMode) { detonateBomb(x, y); return; }
@@ -638,10 +556,8 @@
       if (wave >= 3 && Math.random() < Math.min(0.35, 0.05 + wave * 0.03)) type = 'predador';
       queue.push(type);
     }
-    if (wave > 0 && wave % 5 === 0) {
-      queue.push('boss');
-      if (wave >= 10) queue.push('boss');
-    }
+    const bosses = R.bossCount(wave);
+    for (let i = 0; i < bosses; i += 1) queue.push('boss');
     return queue;
   }
 
@@ -666,6 +582,7 @@
   }
 
   function beginNextWave() {
+    if (onlineActive) return;
     if (!state || !state.nextWaveSummary || state.over) return;
     if (!isVs() && state.pendingUpgrade) return;
     if (isVs() && state.player.pendingUpgrade) return;
@@ -698,6 +615,10 @@
   }
 
   function choosePlayerPack(packId) {
+    if (onlineActive) {
+      if (onlineSend && ATTACK_PACKS[packId]) onlineSend({ type: 'command', command: { kind: 'pack', pack: packId } });
+      return;
+    }
     if (!isVs() || !state.pendingPack || !ATTACK_PACKS[packId]) return;
     state.playerPack = packId;
     state.aiPack = aiPickPack();
@@ -729,23 +650,30 @@
     updateActionButtons();
   }
 
+  function appendSummaryStat(parent, label, value) {
+    const wrap = document.createElement('div');
+    wrap.className = 'summary-stat';
+    wrap.append(document.createTextNode(label));
+    const strong = document.createElement('strong');
+    strong.textContent = value;
+    wrap.append(strong);
+    parent.append(wrap);
+  }
+
   function updateWaveSummaryDisplay() {
     const summary = state.nextWaveSummary;
     if (!summary) return;
+    waveSummaryStats.replaceChildren();
     if (isVs()) {
-      waveSummaryStats.innerHTML = [
-        `<div class="summary-stat">Seu ouro<strong>+$${summary.gold}</strong></div>`,
-        `<div class="summary-stat">Sua pontuação<strong>+${summary.score}</strong></div>`,
-        `<div class="summary-stat">Pack IA<strong>${summary.aiPack || '—'}</strong></div>`,
-        `<div class="summary-stat">Próxima<strong>${summary.difficulty}</strong></div>`,
-      ].join('');
+      appendSummaryStat(waveSummaryStats, 'Seu ouro', `+$${summary.gold}`);
+      appendSummaryStat(waveSummaryStats, 'Sua pontuação', `+${summary.score}`);
+      appendSummaryStat(waveSummaryStats, 'Pack IA', summary.aiPack || '—');
+      appendSummaryStat(waveSummaryStats, 'Próxima', String(summary.difficulty));
     } else {
-      waveSummaryStats.innerHTML = [
-        `<div class="summary-stat">Ouro ganho<strong>+$${summary.gold}</strong></div>`,
-        `<div class="summary-stat">Pontuação<strong>+${summary.score}</strong></div>`,
-        `<div class="summary-stat">Próxima dificuldade<strong>${summary.difficulty}</strong></div>`,
-        `<div class="summary-stat">Inimigos<strong>${summary.enemyCount}</strong></div>`,
-      ].join('');
+      appendSummaryStat(waveSummaryStats, 'Ouro ganho', `+$${summary.gold}`);
+      appendSummaryStat(waveSummaryStats, 'Pontuação', `+${summary.score}`);
+      appendSummaryStat(waveSummaryStats, 'Próxima dificuldade', String(summary.difficulty));
+      appendSummaryStat(waveSummaryStats, 'Inimigos', String(summary.enemyCount));
     }
     const seconds = Math.max(0, Math.ceil(summary.remaining));
     waveSummaryCountdown.textContent = `${paused ? 'Pausado · ' : ''}Próxima onda em ${seconds}s`;
@@ -765,8 +693,7 @@
         aiPack: ATTACK_PACKS[state.aiPack]?.name || state.aiPack,
       };
     } else {
-      let enemyCount = enemyCountForWave(nextWave);
-      if (nextWave % 5 === 0) enemyCount += 1;
+      const enemyCount = R.previewEnemyCount(nextWave);
       state.nextWaveSummary = {
         remaining: 5,
         gold: state.waveGold,
@@ -857,6 +784,10 @@
   }
 
   function chooseUpgrade(id) {
+    if (onlineActive) {
+      if (onlineSend) onlineSend({ type: 'command', command: { kind: 'upgrade', upgradeId: id } });
+      return;
+    }
     const side = activeSide();
     if (!side.pendingUpgrade) return;
     const option = side.pendingUpgrade.find((candidate) => candidate.id === id);
@@ -890,6 +821,29 @@
     if (side === state.player && Math.floor(side.goldEarned / UPGRADE_MILESTONE) > side.goldUpgradeLevel && !side.pendingUpgrade) {
       side.goldUpgradeLevel += 1;
       openUpgradeModal();
+    } else if (state.ai && side === state.ai && gameMode === 'vsia') {
+      aiResolveUpgrades();
+    }
+  }
+
+  let aiUpgrading = false;
+  function aiResolveUpgrades() {
+    if (aiUpgrading || !state || !state.ai || gameMode !== 'vsia') return;
+    aiUpgrading = true;
+    try {
+      const ai = state.ai;
+      while (Math.floor(ai.goldEarned / UPGRADE_MILESTONE) > ai.goldUpgradeLevel && !state.over) {
+        ai.goldUpgradeLevel += 1;
+        const choices = shuffledOptions(ai);
+        const option = choices[0];
+        if (!option) break;
+        option.apply(ai);
+        if (UPGRADE_OPTIONS.includes(option)) {
+          ai.upgrades.counts[option.id] = (ai.upgrades.counts[option.id] || 0) + 1;
+        }
+      }
+    } finally {
+      aiUpgrading = false;
     }
   }
 
@@ -917,6 +871,7 @@
   }
 
   function detonateBomb(x, y) {
+    if (onlineActive) return;
     const side = state.player;
     if (side.gold < BOMB_COST || side.bombCd > 0) return;
     if (isVs() && x >= MID) return;
@@ -933,6 +888,10 @@
   }
 
   function activateFreeze() {
+    if (onlineActive) {
+      if (onlineSend) onlineSend({ type: 'command', command: { kind: 'freeze' } });
+      return;
+    }
     if (!missionStarted || !state || state.over || activeSide().pendingUpgrade) return;
     const side = state.player;
     if (side.gold < FREEZE_COST || side.freezeCd > 0) return;
@@ -944,6 +903,10 @@
   }
 
   function buyVida() {
+    if (onlineActive) {
+      if (onlineSend) onlineSend({ type: 'command', command: { kind: 'shield' } });
+      return;
+    }
     if (!missionStarted || !state || state.over || activeSide().pendingUpgrade) return;
     const side = state.player;
     if (side.vidaBoughtThisWave || side.gold < VIDA_COST) return;
@@ -995,6 +958,7 @@
   }
 
   function togglePause() {
+    if (onlineActive) return;
     if (!missionStarted || !state || state.over || activeSide().pendingUpgrade) return;
     if (isVs() && state.pendingPack) return;
     paused = !paused;
@@ -1073,8 +1037,14 @@
   }
 
   function aiTryBuild() {
-    if (!isVs() || state.over || paused) return;
+    if (!isVs() || state.over || paused || gameMode !== 'vsia') return;
     const ai = state.ai;
+    if (R.shouldBuyShield(ai)) {
+      ai.gold -= VIDA_COST;
+      ai.hp += VIDA_BONUS;
+      ai.maxHp = Math.max(ai.maxHp, ai.hp);
+      ai.vidaBoughtThisWave = true;
+    }
     let prefer = 'laser';
     if (state.playerPack === 'pesada') prefer = 'sonda';
     else if (state.playerPack === 'leve') prefer = 'escudo';
@@ -1191,6 +1161,11 @@
 
   function update(dt) {
     if (!state) return;
+    if (onlineActive) {
+      for (const f of fx) f.life -= dt;
+      fx = fx.filter((item) => item.life > 0);
+      return;
+    }
     if (hitFlash > 0) hitFlash = Math.max(0, hitFlash - dt);
     if (hitFlashAi > 0) hitFlashAi = Math.max(0, hitFlashAi - dt);
     const side = state.player;
@@ -1483,7 +1458,7 @@
       ctx.textAlign = 'center';
       ctx.fillText('VOCÊ', MID / 2, 16);
       ctx.fillStyle = '#f9a8d4';
-      ctx.fillText('IA', MID + MID / 2, 16);
+      ctx.fillText(onlineActive ? (state && state.opponentNick) || 'Amigo' : 'IA', MID + MID / 2, 16);
       const ls = vsPaths.left[0];
       const rs = vsPaths.right[0];
       ctx.fillStyle = '#3a4160';
@@ -1497,7 +1472,7 @@
         const le = vsPaths.left[vsPaths.left.length - 1];
         const re = vsPaths.right[vsPaths.right.length - 1];
         drawBaseAt(le.x, le.y, state.player, BASES[baseKey].emoji, '#6b5cff');
-        drawBaseAt(re.x, re.y, state.ai, '🤖', '#db2777');
+        drawBaseAt(re.x, re.y, state.ai, onlineActive ? BASES[baseKey].emoji : '🤖', '#db2777');
         drawTowers(state.player.towers, state.player);
         drawTowers(state.ai.towers, state.ai);
         for (const e of state.player.enemies) drawEnemy(e);
@@ -1585,7 +1560,9 @@
     } else if (state && state.pendingPack) {
       // pack modal
     } else if (paused) {
-      overlay('Pausado');
+      overlay(onlinePause
+        ? `Amigo reconectando… ${Math.ceil(onlinePause.secondsLeft)}s`
+        : 'Pausado');
     } else if (state && state.over && !isVs()) {
       overlay(`Base caiu — ${state.score} pts · Reset`);
     } else if (state && state.wonWave && !state.nextWaveSummary && !state.player.pendingUpgrade) {
@@ -1597,8 +1574,9 @@
       const goldProgress = state.player.goldEarned % UPGRADE_MILESTONE;
       const modeLabel = bombMode ? 'Bomba' : sel.name;
       if (isVs()) {
+        const other = onlineActive ? (state.opponentNick || 'Amigo') : 'IA';
         statsEl.textContent =
-          `Você HP ${state.player.hp} $${state.player.gold} · IA HP ${state.ai.hp} $${state.ai.gold} · Onda ${state.wave} · Pts ${state.player.score} · ${modeLabel}`;
+          `Você HP ${state.player.hp} $${state.player.gold} · ${other} HP ${state.ai.hp} $${state.ai.gold} · Onda ${state.wave} · Pts ${state.player.score} · ${modeLabel}`;
       } else {
         statsEl.textContent =
           `HP ${state.hp} · $${state.gold} · Ouro $${goldProgress}/${UPGRADE_MILESTONE} → upgrade · Onda ${state.wave} · Pts ${state.score} · ${modeLabel}`;
@@ -1698,6 +1676,189 @@
     mapKey = mapSelect.value;
     recomputePath();
   });
+
+  function copySideFromNet(viewSide, previous) {
+    const side = previous || freshSide();
+    side.hp = viewSide.hp;
+    side.maxHp = viewSide.maxHp;
+    side.gold = viewSide.gold;
+    side.score = viewSide.score;
+    side.goldEarned = viewSide.goldEarned || 0;
+    side.upgrades = viewSide.upgrades || side.upgrades;
+    side.towers = (viewSide.towers || []).map((tower) => ({ x: tower.x, y: tower.y, cooldown: 0, kind: tower.kind }));
+    side.enemies = (viewSide.enemies || []).map((enemy) => ({
+      type: enemy.type,
+      pathKey: enemy.pathKey || enemy.lane,
+      lane: enemy.lane,
+      hp: enemy.hp,
+      maxHp: enemy.maxHp,
+      armor: enemy.armor || 0,
+      dist: enemy.dist,
+      alive: true,
+      slowMul: enemy.slowMul || 1,
+      slowTimer: enemy.slowMul < 1 ? 0.4 : 0,
+      strength: 1,
+      speed: 0,
+      baseSpeed: 0,
+      reward: 0,
+    }));
+    side.bullets = (viewSide.bullets || []).map((bullet) => ({
+      x: bullet.x, y: bullet.y, tx: bullet.tx, ty: bullet.ty,
+      color: bullet.color, aoe: bullet.aoe || 0, life: 1, target: { alive: false },
+    }));
+    side.heroPlaced = !!viewSide.heroPlaced;
+    side.bombCd = viewSide.bombCd || 0;
+    side.freezeCd = viewSide.freezeCd || 0;
+    side.vidaBoughtThisWave = !!viewSide.vidaBought;
+    side.pendingUpgrade = null;
+    return side;
+  }
+
+  function showServerUpgrade(options, goldEarned) {
+    state.player.pendingUpgrade = options;
+    upgradeChoicesEl.replaceChildren();
+    upgradeProgressEl.textContent = `Ouro ganho nesta run: $${goldEarned || 0}. O servidor oferece estas cartas.`;
+    for (const option of options) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'upgrade-choice';
+      const title = document.createElement('strong');
+      title.textContent = option.title;
+      const description = document.createElement('span');
+      description.textContent = option.description;
+      button.append(title, description);
+      button.addEventListener('click', () => chooseUpgrade(option.id));
+      upgradeChoicesEl.append(button);
+    }
+    upgradeModal.classList.add('open');
+  }
+
+  function renderFriendRank(rows) {
+    const box = document.getElementById('friendRankBox');
+    const list = document.getElementById('friendRank');
+    if (!box || !list) return;
+    if (!onlineActive || !rows) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    list.replaceChildren();
+    if (!rows.length) {
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = 'Sem partidas entre amigos';
+      list.append(empty);
+      return;
+    }
+    rows.slice(0, 10).forEach((row, index) => {
+      const item = document.createElement('li');
+      item.textContent = `#${index + 1} ${row.nick} · ${row.wins}V ${row.losses}D · ${row.points} pts`;
+      list.append(item);
+    });
+  }
+
+  function applyOnlineSnapshot(view) {
+    onlineActive = true;
+    gameMode = 'online';
+    if (view.base) baseKey = view.base;
+    renderFriendRank(view.ranking || []);
+    if (!view.match) {
+      missionStarted = false;
+      startScreen.classList.add('open');
+      uiBranch = 'multi';
+      uiMp = 'amigo';
+      syncStartBranch();
+      packModal.classList.remove('open');
+      upgradeModal.classList.remove('open');
+      winnerOverlay.classList.remove('open');
+      waveSummary.classList.remove('open');
+      syncModeUi();
+      return;
+    }
+    missionStarted = true;
+    startScreen.classList.remove('open');
+    if (!state || state.mode !== 'online') {
+      state = freshVsState();
+      state.mode = 'online';
+    }
+    const match = view.match;
+    state.youNick = view.youNick;
+    state.opponentNick = view.opponentNick || 'Amigo';
+    state.wave = match.wave;
+    state.over = match.phase === 'over';
+    state.pendingPack = !!match.youNeedPack;
+    state.playerPack = match.youPack;
+    state.aiPack = match.opponentPack;
+    state.player = copySideFromNet(match.you, state.player);
+    state.ai = copySideFromNet(match.opponent, state.ai);
+    state.winner = match.winner === 'you' ? 'player' : match.winner === 'opponent' ? 'ai' : match.winner;
+    freezeTimer = match.you.freezeLeft || 0;
+    if (match.youNeedPack && match.phase !== 'over') packModal.classList.add('open');
+    else packModal.classList.remove('open');
+    if (match.upgrade && match.upgrade.forYou) {
+      const current = state.player.pendingUpgrade;
+      const same = Array.isArray(current)
+        && current.length === match.upgrade.options.length
+        && current.every((item, index) => item.id === match.upgrade.options[index].id);
+      if (!same) showServerUpgrade(match.upgrade.options, match.you.goldEarned);
+    } else {
+      upgradeModal.classList.remove('open');
+      state.player.pendingUpgrade = null;
+    }
+    if (match.phase === 'summary' && match.summarySeconds != null) {
+      state.nextWaveSummary = { remaining: match.summarySeconds };
+      waveSummary.classList.add('open');
+      waveSummaryCountdown.textContent = `Próxima onda em ${Math.ceil(match.summarySeconds)}s`;
+      waveSummaryStats.replaceChildren();
+      appendSummaryStat(waveSummaryStats, 'Onda', String(match.wave));
+      appendSummaryStat(waveSummaryStats, 'Seu ouro', `$${match.you.gold}`);
+    } else {
+      state.nextWaveSummary = null;
+      waveSummary.classList.remove('open');
+    }
+    if (match.phase === 'over') {
+      winnerTitle.textContent = match.winner === 'you' ? 'Vitória!' : match.winner === 'draw' ? 'Empate' : 'Derrota';
+      winnerBody.textContent = match.resultText || '';
+      document.getElementById('btnWinnerOk').textContent = 'Voltar ao lobby';
+      winnerOverlay.classList.add('open');
+    } else {
+      winnerOverlay.classList.remove('open');
+    }
+    const packSub = document.querySelector('#packModal .sub');
+    if (packSub) packSub.textContent = 'O pack que você enviar ataca a pista do amigo. O dele ataca a sua.';
+    paused = !!view.pause;
+    onlinePause = view.pause || null;
+    recomputeVsPaths();
+    syncModeUi();
+    updateActionButtons();
+  }
+
+  function showFriendSetup(code) {
+    uiBranch = 'multi';
+    uiMp = 'amigo';
+    const input = document.getElementById('onlineCode');
+    if (input && code) input.value = code;
+    syncStartBranch();
+  }
+
+  function leaveOnline() {
+    onlineActive = false;
+    onlineSend = null;
+    onlinePause = null;
+    rankSaved = true;
+    const box = document.getElementById('friendRankBox');
+    if (box) box.hidden = true;
+    document.getElementById('btnWinnerOk').textContent = 'Voltar ao menu';
+    resetGame();
+  }
+
+  window.ViaLacteaGame = {
+    setOnlineSender(fn) { onlineSend = fn; },
+    applyOnline: applyOnlineSnapshot,
+    showFriendSetup,
+    leaveOnline,
+    isOnline() { return onlineActive; },
+  };
 
   state = freshSoloState();
   syncStartBranch();
